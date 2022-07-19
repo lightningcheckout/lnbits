@@ -94,11 +94,11 @@ class CLightningWallet(Wallet):
                 if not self.supports_description_hash:
                     raise Unsupported("description_hash")
 
-                params = [msat, label, description_hash.hex()]
+                params = [msat, label, description_hash.hex(), 3600]
                 r = self.ln.call("invoicewithdescriptionhash", params)
                 return InvoiceResponse(True, label, r["bolt11"], "")
             else:
-                r = self.ln.invoice(msat, label, memo, exposeprivatechannels=True)
+                r = self.ln.invoice(msat, label, memo, expiry=3600, exposeprivatechannels=True)
                 return InvoiceResponse(True, label, r["bolt11"], "")
         except RpcError as exc:
             error_message = f"lightningd '{exc.method}' failed with '{exc.error}'."
