@@ -1,13 +1,7 @@
-{% extends "public.html" %} {% block toolbar_title %} {{ tpos.name }}
-<q-btn
-  flat
-  dense
-  size="md"
-  @click.prevent="urlDialog.show = true"
-  icon="share"
-  color="white"
-></q-btn>
-{% endblock %} {% block footer %}{% endblock %} {% block page_container %}
+{% extends "public.html" %}
+{% block toolbar_title %} {{ tpos.name }}{% endblock %}
+{% block footer %}{% endblock %}
+{% block page_container %}
 <q-page-container>
   <q-page>
     <q-page-sticky v-if="exchangeRate" expand position="top">
