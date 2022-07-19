@@ -54,7 +54,7 @@ async def api_tpos_delete(
 
 @tpos_ext.post("/api/v1/tposs/{tpos_id}/invoices", status_code=HTTPStatus.CREATED)
 async def api_tpos_create_invoice(
-    amount: int = Query(..., ge=1), tipAmount: int = None, tpos_id: str = None
+    amount: int = Query(..., ge=1), tipAmount: int = None, tpos_id: str = None, famount: str = None
 ):
     tpos = await get_tpos(tpos_id)
 
@@ -64,10 +64,11 @@ async def api_tpos_create_invoice(
         )
 
     try:
+        memo=str(tpos.name) + " (" + str(famount) + " " + str(tpos.currency) + ")"
         payment_hash, payment_request = await create_invoice(
             wallet_id=tpos.wallet,
             amount=amount,
-            memo=f"{tpos.name}",
+            memo=memo,
             extra={"tag": "tpos", "tipAmount": tipAmount, "tposId": tpos_id},
         )
     except Exception as e:

@@ -367,7 +367,8 @@
           .post('/tpos/api/v1/tposs/' + this.tposId + '/invoices', null, {
             params: {
               amount: this.sat,
-              tipAmount: this.tipAmountSat
+              tipAmount: this.tipAmountSat,
+              famount: this.amount
             }
           })
           .then(function (response) {
