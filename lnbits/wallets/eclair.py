@@ -7,7 +7,10 @@ from typing import AsyncGenerator, Dict, Optional
 
 import httpx
 from loguru import logger
-from websockets import connect
+
+# TODO: https://github.com/lnbits/lnbits-legend/issues/764
+# mypy https://github.com/aaugustin/websockets/issues/940
+from websockets import connect  # type: ignore
 from websockets.exceptions import (
     ConnectionClosed,
     ConnectionClosedError,
@@ -97,7 +100,7 @@ class EclairWallet(Wallet):
                 f"{self.url}/payinvoice",
                 headers=self.auth,
                 data={"invoice": bolt11, "blocking": True},
-                timeout=40,
+                timeout=None,
             )
 
         if "error" in r.json():

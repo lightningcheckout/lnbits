@@ -84,7 +84,7 @@ class LNPayWallet(Wallet):
                 f"{self.endpoint}/wallet/{self.wallet_key}/withdraw",
                 headers=self.auth,
                 json={"payment_request": bolt11},
-                timeout=180,
+                timeout=None,
             )
 
         try:
@@ -119,7 +119,7 @@ class LNPayWallet(Wallet):
         return PaymentStatus(statuses[r.json()["settled"]])
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
-        self.queue = asyncio.Queue(0)
+        self.queue: asyncio.Queue = asyncio.Queue(0)
         while True:
             value = await self.queue.get()
             yield value
