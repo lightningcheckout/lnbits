@@ -8,7 +8,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install build deps
 RUN apt-get update
-RUN apt-get install -y --no-install-recommends build-essential pkg-config
+RUN apt-get install -y --no-install-recommends build-essential pkg-config libpq-dev
 RUN python -m pip install --upgrade pip
 RUN pip install wheel
 
@@ -36,6 +36,9 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Copy in app source
 WORKDIR /app
 COPY --chown=1000:1000 lnbits /app/lnbits
+COPY --chown=1000:1000 build.py /app
+
+RUN python build.py
 
 ENV LNBITS_PORT="5000"
 ENV LNBITS_HOST="0.0.0.0"
