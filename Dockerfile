@@ -36,8 +36,9 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Copy in app source
 WORKDIR /app
 COPY --chown=1000:1000 lnbits /app/lnbits
-COPY --chown=1000:1000 build.py /app
 
+# Staticfiles
+COPY --chown=1000:1000 build.py /app
 RUN python build.py
 
 ENV LNBITS_PORT="5000"
