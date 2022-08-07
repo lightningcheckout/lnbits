@@ -94,6 +94,7 @@ class CoreLightningWallet(Wallet):
                 description=description_hash.decode("utf-8")
                 if description_hash
                 else memo,
+                expiry=3600,
                 exposeprivatechannels=True,
                 deschashonly=True
                 if description_hash
