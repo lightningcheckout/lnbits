@@ -216,6 +216,47 @@ sudo systemctl enable lnbits.service
 sudo systemctl start lnbits.service
 ```
 
+## Running behind an apache2 reverse proxy over https
+Install apache2 and enable apache2 mods
+```sh
+apt-get install apache2 certbot
+a2enmod headers ssl proxy proxy-http
+```
+create a ssl certificate with letsencrypt
+```sh
+certbot certonly --webroot --agree-tos --text --non-interactive --webroot-path /var/www/html -d lnbits.org
+```
+create a apache2 vhost at: /etc/apache2/sites-enabled/lnbits.conf
+```sh
+cat <<EOF > /etc/apache2/sites-enabled/lnbits.conf
+<VirtualHost *:443>
+  ServerName lnbits.org
+  SSLEngine On
+  SSLProxyEngine On
+  SSLCertificateFile /etc/letsencrypt/live/lnbits.org/fullchain.pem
+  SSLCertificateKeyFile /etc/letsencrypt/live/lnbits.org/privkey.pem
+  Include /etc/letsencrypt/options-ssl-apache.conf
+  LogLevel info
+  ErrorLog /var/log/apache2/lnbits.log
+  CustomLog /var/log/apache2/lnbits-access.log combined
+  RequestHeader set "X-Forwarded-Proto" expr=%{REQUEST_SCHEME}
+  RequestHeader set "X-Forwarded-SSL" expr=%{HTTPS}
+  ProxyPreserveHost On
+  ProxyPass / http://localhost:5000/
+  ProxyPassReverse / http://localhost:5000/
+  <Proxy *>
+      Order deny,allow
+      Allow from all
+  </Proxy>
+</VirtualHost>
+EOF
+```
+restart apache2
+```sh
+service restart apache2
+```
+
+
 ## Using https without reverse proxy
 The most common way of using LNbits via https is to use a reverse proxy such as Caddy, nginx, or ngriok. However, you can also run LNbits via https without additional software. This is useful for development purposes or if you want to use LNbits in your local network.
 
@@ -232,16 +273,22 @@ chmod +x mkcert-v*-linux-amd64
 sudo cp mkcert-v*-linux-amd64 /usr/local/bin/mkcert
 ```
 #### Create certificate
-To create a certificate, first `cd` into your lnbits folder and execute the following command ([more info](https://kifarunix.com/how-to-create-self-signed-ssl-certificate-with-mkcert-on-ubuntu-18-04/))
+To create a certificate, first `cd` into your LNbits folder and execute the following command on Linux:
+```sh
+openssl req -new -newkey rsa:4096 -x509 -sha256 -days 3650 -nodes -out cert.pem -keyout key.pem
+```
+This will create two new files (`key.pem` and `cert.pem `).
+
+Alternatively, you can use mkcert ([more info](https://kifarunix.com/how-to-create-self-signed-ssl-certificate-with-mkcert-on-ubuntu-18-04/)):
 ```sh
 # add your local IP (192.x.x.x) as well if you want to use it in your local network
 mkcert localhost 127.0.0.1 ::1
 ```
 
-This will create two new files (`localhost-key.pem` and `localhost.pem `) which you can then pass to uvicorn when you start LNbits:
+You can then pass the certificate files to uvicorn when you start LNbits:
 
 ```sh
-./venv/bin/uvicorn lnbits.__main__:app --host 0.0.0.0 --port 5000 --ssl-keyfile ./localhost-key.pem --ssl-certfile ./localhost.pem
+./venv/bin/uvicorn lnbits.__main__:app --host 0.0.0.0 --port 5000 --ssl-keyfile ./key.pem --ssl-certfile ./cert.pem
 ```
 
 
