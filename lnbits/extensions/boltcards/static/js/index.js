@@ -16,7 +16,6 @@ new Vue({
     return {
       toggleAdvanced: false,
       nfcTagReading: false,
-      nfcSupported: typeof NDEFReader != 'undefined',
       lnurlLink: `${window.location.host}/boltcards/api/v1/scan/`,
       cards: [],
       hits: [],
@@ -104,6 +103,12 @@ new Vue({
             align: 'left',
             label: 'Card name',
             field: 'card_name'
+          },
+          {
+            name: 'amount',
+            align: 'left',
+            label: 'Amount',
+            field: 'amount'
           },
           {
             name: 'old_ctr',
@@ -263,7 +268,9 @@ new Vue({
         external_id: card.external_id,
         k0: card.k0,
         k1: card.k1,
-        k2: card.k2
+        k2: card.k2,
+        k3: card.k1,
+        k4: card.k2
       }
       this.qrCodeDialog.show = true
     },

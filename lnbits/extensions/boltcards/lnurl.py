@@ -20,6 +20,8 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
+from lnbits import bolt11
+
 from lnbits.core.services import create_invoice
 from lnbits.core.views.api import pay_invoice
 
@@ -83,7 +85,7 @@ async def api_scan(p, c, request: Request, external_id: str = None):
     hits_amount = 0
     for hit in todays_hits:
         hits_amount = hits_amount + hit.amount
-    if (hits_amount + card.tx_limit) > card.daily_limit:
+    if hits_amount > card.daily_limit:
         return {"status": "ERROR", "reason": "Max daily limit spent."}
     hit = await create_hit(card.id, ip, agent, card.counter, ctr_int)
     lnurlpay = lnurl_encode(request.url_for("boltcards.lnurlp_response", hit_id=hit.id))
@@ -95,7 +97,6 @@ async def api_scan(p, c, request: Request, external_id: str = None):
         "maxWithdrawable": card.tx_limit * 1000,
         "defaultDescription": f"Boltcard (refund address lnurl://{lnurlpay})",
     }
-
 
 @boltcards_ext.get(
     "/api/v1/lnurl/cb/{hitid}",
@@ -111,22 +112,22 @@ async def lnurl_callback(
     card = await get_card(hit.card_id)
     if not hit:
         return {"status": "ERROR", "reason": f"LNURL-pay record not found."}
+    if hit.id != k1:
+        return {"status": "ERROR", "reason": "Bad K1"}
+    if hit.spent:
+        return {"status": "ERROR", "reason": f"Payment already claimed"}
+    invoice = bolt11.decode(pr)
+    hit = await spend_hit(id=hit.id, amount=int(invoice.amount_msat / 1000))
     try:
-        if hit.id != k1:
-            return {"status": "ERROR", "reason": "Bad K1"}
-        if hit.spent:
-            return {"status": "ERROR", "reason": f"Payment already claimed"}
-        hit = await spend_hit(hit.id)
         await pay_invoice(
             wallet_id=card.wallet,
             payment_request=pr,
             max_sat=card.tx_limit,
-            extra={"tag": "boltcard"},
+            extra={"tag": "boltcard", "tag": hit.id},
         )
         return {"status": "OK"}
     except:
         return {"status": "ERROR", "reason": f"Payment failed"}
-
 
 # /boltcards/api/v1/auth?a=00000000000000000000000000000000
 @boltcards_ext.get("/api/v1/auth")
@@ -136,7 +137,6 @@ async def api_auth(a, request: Request):
         return response
 
     card = await get_card_by_otp(a)
-
     if not card:
         raise HTTPException(
             detail="Card does not exist.", status_code=HTTPStatus.NOT_FOUND
@@ -150,14 +150,19 @@ async def api_auth(a, request: Request):
     )
 
     response = {
+        "card_name": card.card_name,
+        "id": 1,
         "k0": card.k0,
         "k1": card.k1,
         "k2": card.k2,
-        "lnurlw_base": lnurlw_base,
+        "k3": card.k1,
+        "k4": card.k2,
+        "lnurlw_base": "lnurlw://" + lnurlw_base,
+        "protocol_name": "new_bolt_card_response",
+        "protocol_version": 1
     }
-
+    
     return response
-
 
 ###############LNURLPAY REFUNDS#################
 
