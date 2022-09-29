@@ -12,7 +12,6 @@ WORKDIR /app
 COPY . .
 
 RUN poetry config virtualenvs.create false
-RUN poetry add pyln-client
 RUN poetry install --no-dev --no-root
 RUN poetry run python build.py
 
