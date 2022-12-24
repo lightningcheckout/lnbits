@@ -259,25 +259,30 @@ new Vue({
       this.parse.camera.show = false
     },
     updateBalance: function (credit) {
-      if (LNBITS_DENOMINATION != 'sats') {
-        credit = credit * 100
-      }
       LNbits.api
-        .request('PUT', '/api/v1/wallet/balance/' + credit, this.g.wallet.inkey)
-        .catch(err => {
-          LNbits.utils.notifyApiError(err)
-        })
-        .then(response => {
-          let data = response.data
-          if (data.status === 'ERROR') {
-            this.$q.notify({
-              timeout: 5000,
-              type: 'warning',
-              message: `Failed to update.`
-            })
-            return
+        .request(
+          'PUT',
+          '/admin/api/v1/topup/?usr=' + this.g.user.id,
+          this.g.user.wallets[0].adminkey,
+          {
+            amount: credit,
+            id: this.g.user.wallets[0].id
           }
-          this.balance = this.balance + data.balance
+        )
+        .then(response => {
+          this.$q.notify({
+            type: 'positive',
+            message:
+              'Success! Added ' +
+              credit +
+              ' sats to ' +
+              this.g.user.wallets[0].id,
+            icon: null
+          })
+          this.balance += parseInt(credit)
+        })
+        .catch(function (error) {
+          LNbits.utils.notifyApiError(error)
         })
     },
     closeReceiveDialog: function () {
@@ -360,6 +365,35 @@ new Vue({
           LNbits.utils.notifyApiError(err)
           this.receive.status = 'pending'
         })
+    },
+    onInitQR: async function (promise) {
+      try {
+        await promise
+      } catch (error) {
+        let mapping = {
+          NotAllowedError: 'ERROR: you need to grant camera access permission',
+          NotFoundError: 'ERROR: no camera on this device',
+          NotSupportedError:
+            'ERROR: secure context required (HTTPS, localhost)',
+          NotReadableError: 'ERROR: is the camera already in use?',
+          OverconstrainedError: 'ERROR: installed cameras are not suitable',
+          StreamApiNotSupportedError:
+            'ERROR: Stream API is not supported in this browser',
+          InsecureContextError:
+            'ERROR: Camera access is only permitted in secure context. Use HTTPS or localhost rather than HTTP.'
+        }
+        let valid_error = Object.keys(mapping).filter(key => {
+          return error.name === key
+        })
+        let camera_error = valid_error
+          ? mapping[valid_error]
+          : `ERROR: Camera error (${error.name})`
+        this.parse.camera.show = false
+        this.$q.notify({
+          message: camera_error,
+          type: 'negative'
+        })
+      }
     },
     decodeQR: function (res) {
       this.parse.data.request = res
