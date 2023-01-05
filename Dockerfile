@@ -18,7 +18,7 @@ RUN poetry run python build.py
 
 ENV LNBITS_PORT="5000"
 ENV LNBITS_HOST="0.0.0.0"
-
+ENV LNBITS_ADMIN_UI=True
 EXPOSE 5000
 
 CMD ["sh", "-c", "poetry run lnbits --port $LNBITS_PORT --host $LNBITS_HOST"]
