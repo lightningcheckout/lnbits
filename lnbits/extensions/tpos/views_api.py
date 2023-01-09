@@ -77,6 +77,7 @@ async def api_tpos_create_invoice(
             wallet_id=tpos.wallet,
             amount=amount,
             memo=memo,
+            webhook='https://portal.lightningcheckout.eu/webhook/paymentupdate',
             extra={"tag": "tpos", "tipAmount": tipAmount, "tposId": tpos_id},
         )
     except Exception as e:
