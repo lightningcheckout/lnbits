@@ -1,12 +1,11 @@
 {% extends "public.html" %} {% block page %}
+{% block header %}{% endblock %}
+{% block footer %}{% endblock %}
 <div class="row items-center q-mt-md">
   <div class="col-lg-4 col-md-3 col-sm-1"></div>
   <div class="col-lg-4 col-md-6 col-sm-10">
     <q-card>
       <div class="row q-mb-md">
-        <div class="col text-center q-mt-md">
-          <span class="text-h4" v-text="charge.description"></span>
-        </div>
       </div>
       <div class="row">
         <div class="col text-center">
@@ -63,15 +62,6 @@
               </q-badge>
             </div>
           </div>
-          <div class="row items-center q-mt-sm">
-            <div class="col-4 q-pr-lg">Amount paid:</div>
-            <div class="col-8 q-pr-lg">
-              <q-badge color="orange">
-                <span v-text="charge.balance" class="text-subtitle2"></span>
-                sat</q-badge
-              >
-            </div>
-          </div>
           <div v-if="pendingFunds" class="row items-center q-mt-sm">
             <div class="col-4 q-pr-lg">Amount pending:</div>
             <div class="col-8 q-pr-lg">
@@ -80,25 +70,7 @@
               </q-badge>
             </div>
           </div>
-          <div class="row items-center q-mt-sm">
-            <div class="col-4 q-pr-lg">Amount due:</div>
-            <div class="col-8 q-pr-lg">
-              <q-badge v-if="charge.amount - charge.balance > 0" color="green">
-                <span
-                  v-text="charge.amount - charge.balance"
-                  class="text-subtitle2"
-                ></span>
-                sat
-              </q-badge>
-              <q-badge
-                v-else="charge.amount - charge.balance <= 0"
-                color="green"
-                class="text-subtitle2"
-              >
-                none</q-badge
-              >
-            </div>
-          </div>
+
         </div>
       </div>
       <q-separator></q-separator>
@@ -127,28 +99,7 @@
                 <q-tooltip> pay with lightning </q-tooltip>
               </q-btn>
             </div>
-            <div class="col">
-              <q-btn
-                flat
-                disable
-                v-if="!charge.onchainaddress || charge.time_elapsed"
-                style="color: primary; width: 100%"
-                label="onchain⛓️"
-              >
-                <q-tooltip>
-                  bitcoin onchain payment method not available
-                </q-tooltip>
-              </q-btn>
-              <q-btn
-                flat
-                v-else
-                @click="payOnchain"
-                style="color: primary; width: 100%"
-                label="onchain⛓️"
-              >
-                <q-tooltip> pay onchain </q-tooltip>
-              </q-btn>
-            </div>
+
           </div>
           <q-separator></q-separator>
         </div>

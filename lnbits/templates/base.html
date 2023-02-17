@@ -23,6 +23,7 @@
 
   <body data-theme="bitcoin">
     <q-layout id="vue" view="hHh lpR lfr" v-cloak>
+    {% block header %}
       <q-header bordered class="bg-marginal-bg">
         <q-toolbar>
           {% block drawer_toggle %}
@@ -144,8 +145,8 @@
             </div>
           </q-btn-dropdown>
         </q-toolbar>
+      {% endblock %}
       </q-header>
-
       {% block drawer %}
       <q-drawer
         v-model="g.visibleDrawer"

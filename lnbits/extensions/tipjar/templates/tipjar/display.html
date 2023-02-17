@@ -1,19 +1,15 @@
-{% extends "public.html" %} {% block page %}
+{% extends "public.html" %}
+{% block header %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block page %}
 <div class="row q-col-gutter-md justify-center">
   <div class="col-12 col-md-7 col-lg-6 q-gutter-y-md">
     <q-card class="q-pa-lg">
       <q-card-section class="q-pa-none">
-        <h5 class="q-my-none">Tip {{ donatee }} some sats!</h5>
+        <h5 class="q-my-none">Send donation to {{ donatee }}</h5>
         <br />
         <q-form @submit="Invoice()" class="q-gutter-md">
-          <q-input
-            filled
-            dense
-            v-model.trim="tipDialog.data.name"
-            maxlength="25"
-            type="name"
-            label="Your Name (or contact info, leave blank for anonymous tip)"
-          ></q-input>
+
           <q-input
             filled
             dense
@@ -31,7 +27,7 @@
             v-model.trim="tipDialog.data.message"
             maxlength="144"
             type="textarea"
-            label="Tip Message (you can leave this blank too)"
+            label="Donation Message (here you can share a comment or your contact info)"
           ></q-input>
           <div class="row q-mt-lg">
             <q-btn
@@ -40,18 +36,16 @@
               :disable="tipDialog.data.sats < 1 || !tipDialog.data.sats"
               type="submit"
               >Submit</q-btn
-            >
+            ><div class="absolute-bottom-right text-center text-weight-thin">Powered by <br><a href="https://lightningcheckout.eu" target="_blank">Lightning Checkout</a></div>
           </div>
         </q-form>
       </q-card-section>
     </q-card>
   </div>
 </div>
-
 {% endblock %} {% block scripts %}
 <script>
   Vue.component(VueQrcode.name, VueQrcode)
-
   new Vue({
     el: '#vue',
     mixins: [windowMixin],
