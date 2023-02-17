@@ -16,13 +16,6 @@
           >
             Time elapsed
           </div>
-          <div
-            color="white"
-            style="background-color: grey; height: 30px; padding: 5px"
-            v-else-if="charge.paid"
-          >
-            Charge paid
-          </div>
           <div v-else>
             <q-linear-progress
               size="30px"
@@ -42,66 +35,6 @@
               </q-item-section>
             </q-linear-progress>
           </div>
-        </div>
-      </div>
-      <div class="row q-ml-md q-mt-md q-mb-lg">
-        <div class="col">
-          <div class="row">
-            <div class="col-4 q-pr-lg">Charge Id:</div>
-            <div class="col-8 q-pr-lg">
-              <q-btn flat dense outline @click="copyText(charge.id)"
-                ><span v-text="charge.id"></span
-              ></q-btn>
-            </div>
-          </div>
-          <div class="row items-center">
-            <div class="col-4 q-pr-lg">Total to pay:</div>
-            <div class="col-8 q-pr-lg">
-              <q-badge color="blue">
-                <span v-text="charge.amount" class="text-subtitle2"></span> sat
-              </q-badge>
-            </div>
-          </div>
-          <div v-if="pendingFunds" class="row items-center q-mt-sm">
-            <div class="col-4 q-pr-lg">Amount pending:</div>
-            <div class="col-8 q-pr-lg">
-              <q-badge color="gray">
-                <span v-text="pendingFunds" class="text-subtitle2"></span> sat
-              </q-badge>
-            </div>
-          </div>
-
-        </div>
-      </div>
-      <q-separator></q-separator>
-      <div class="row">
-        <div class="col">
-          <div class="row">
-            <div class="col">
-              <q-btn
-                flat
-                disable
-                v-if="!charge.payment_request || charge.time_elapsed"
-                style="color: primary; width: 100%"
-                label="lightning⚡"
-              >
-                <q-tooltip>
-                  bitcoin lightning payment method not available
-                </q-tooltip>
-              </q-btn>
-              <q-btn
-                flat
-                v-else
-                @click="payInvoice"
-                style="color: primary; width: 100%"
-                label="lightning⚡"
-              >
-                <q-tooltip> pay with lightning </q-tooltip>
-              </q-btn>
-            </div>
-
-          </div>
-          <q-separator></q-separator>
         </div>
       </div>
     </q-card>
@@ -149,7 +82,7 @@
                 <q-responsive :ratio="1" class="q-mx-md">
                   <qrcode
                     :value="'lightning:' + charge.payment_request.toUpperCase()"
-                    :options="{width: 400}"
+                    :options="{width: 100}"
                     class="rounded-borders"
                   ></qrcode>
                 </q-responsive>
@@ -231,7 +164,7 @@
                 <q-responsive :ratio="1" class="q-mx-md">
                   <qrcode
                     :value="charge.onchainaddress"
-                    :options="{width: 400}"
+                    :options="{width: 800}"
                     class="rounded-borders"
                   ></qrcode>
                 </q-responsive>
