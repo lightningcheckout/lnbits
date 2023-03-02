@@ -111,7 +111,7 @@ Vue.component('lnbits-extension-list', {
     }
   },
   template: `
-    <q-list v-if="user && extensions.length" dense class="lnbits-drawer__q-list">
+    <q-list v-if="user" dense class="lnbits-drawer__q-list">
       <q-item-label header>Extensions</q-item-label>
       <q-item v-for="extension in userExtensions" :key="extension.code"
         clickable
@@ -137,7 +137,15 @@ Vue.component('lnbits-extension-list', {
           <q-icon name="clear_all" color="grey-5" size="md"></q-icon>
         </q-item-section>
         <q-item-section>
-          <q-item-label lines="1" class="text-caption">Manage extensions</q-item-label>
+          <q-item-label lines="1" class="text-caption">Extensions</q-item-label>
+        </q-item-section>
+      </q-item>
+      <q-item clickable tag="a" :href="['/install?usr=', user.id].join('')">
+        <q-item-section side>
+          <q-icon name="playlist_add" color="grey-5" size="md"></q-icon>
+        </q-item-section>
+        <q-item-section>
+          <q-item-label lines="1" class="text-caption">Manage Extensions</q-item-label>
         </q-item-section>
       </q-item>
     </q-list>

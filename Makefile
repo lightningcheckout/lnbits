@@ -4,13 +4,19 @@ all: format check requirements.txt
 
 format: prettier isort black
 
-check: mypy checkprettier checkisort checkblack
+check: mypy pyright pylint flake8 checkisort checkblack checkprettier
 
-prettier: $(shell find lnbits -name "*.js" -o -name ".html")
-	./node_modules/.bin/prettier --write lnbits/static/js/*.js lnbits/core/static/js/*.js lnbits/extensions/*/templates/*/*.html ./lnbits/core/templates/core/*.html lnbits/templates/*.html lnbits/extensions/*/static/js/*.js lnbits/extensions/*/static/components/*/*.js  lnbits/extensions/*/static/components/*/*.html
+prettier:
+	poetry run ./node_modules/.bin/prettier --write lnbits
+
+pyright:
+	poetry run ./node_modules/.bin/pyright
 
 black:
 	poetry run black .
+
+flake8:
+	poetry run flake8
 
 mypy:
 	poetry run mypy
@@ -18,8 +24,11 @@ mypy:
 isort:
 	poetry run isort .
 
-checkprettier: $(shell find lnbits -name "*.js" -o -name ".html")
-	./node_modules/.bin/prettier --check lnbits/static/js/*.js lnbits/core/static/js/*.js lnbits/extensions/*/templates/*/*.html ./lnbits/core/templates/core/*.html lnbits/templates/*.html lnbits/extensions/*/static/js/*.js lnbits/extensions/*/static/components/*/*.js lnbits/extensions/*/static/components/*/*.html
+pylint:
+	poetry run pylint *.py lnbits/ tools/ tests/
+
+checkprettier:
+	poetry run ./node_modules/.bin/prettier --check lnbits
 
 checkblack:
 	poetry run black --check .
@@ -28,10 +37,6 @@ checkisort:
 	poetry run isort --check-only .
 
 test:
-	BOLTZ_NETWORK="regtest" \
-	BOLTZ_URL="http://127.0.0.1:9001" \
-	BOLTZ_MEMPOOL_SPACE_URL="http://127.0.0.1:8080" \
-	BOLTZ_MEMPOOL_SPACE_URL_WS="ws://127.0.0.1:8080" \
 	LNBITS_BACKEND_WALLET_CLASS="FakeWallet" \
 	FAKE_WALLET_SECRET="ToTheMoon1" \
 	LNBITS_DATA_FOLDER="./tests/data" \
@@ -40,20 +45,12 @@ test:
 	poetry run pytest
 
 test-real-wallet:
-	BOLTZ_NETWORK="regtest" \
-	BOLTZ_URL="http://127.0.0.1:9001" \
-	BOLTZ_MEMPOOL_SPACE_URL="http://127.0.0.1:8080" \
-	BOLTZ_MEMPOOL_SPACE_URL_WS="ws://127.0.0.1:8080" \
 	LNBITS_DATA_FOLDER="./tests/data" \
 	PYTHONUNBUFFERED=1 \
 	DEBUG=true \
 	poetry run pytest
 
 test-venv:
-	BOLTZ_NETWORK="regtest" \
-	BOLTZ_URL="http://127.0.0.1:9001" \
-	BOLTZ_MEMPOOL_SPACE_URL="http://127.0.0.1:8080" \
-	BOLTZ_MEMPOOL_SPACE_URL_WS="ws://127.0.0.1:8080" \
 	LNBITS_BACKEND_WALLET_CLASS="FakeWallet" \
 	FAKE_WALLET_SECRET="ToTheMoon1" \
 	LNBITS_DATA_FOLDER="./tests/data" \
