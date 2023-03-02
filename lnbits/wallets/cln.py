@@ -98,7 +98,6 @@ class CoreLightningWallet(Wallet):
                 description=unhashed_description.decode()
                 if unhashed_description
                 else memo,
-                expiry=3600,
                 exposeprivatechannels=True,
                 deschashonly=True
                 if unhashed_description
