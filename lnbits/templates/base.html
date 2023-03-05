@@ -64,6 +64,16 @@
           >
             <div class="row no-wrap q-pa-md">
               <q-btn
+                v-if="g.allowedThemes.includes('lnc')"
+                dense
+                flat
+                @click="changeColor('lnc')"
+                icon="format_color_fill"
+                color="yellow"
+                size="md"
+                ><q-tooltip>lnc</q-tooltip>
+              </q-btn>
+              <q-btn
                 v-if="g.allowedThemes.includes('classic')"
                 dense
                 flat

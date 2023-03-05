@@ -70,6 +70,7 @@ class ThemesSettings(LNbitsSettings):
     lnbits_default_wallet_name: str = Field(default="LNbits wallet")
     lnbits_theme_options: List[str] = Field(
         default=[
+            "lnc",
             "classic",
             "freedom",
             "mint",

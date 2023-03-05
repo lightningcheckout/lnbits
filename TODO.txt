@@ -1,0 +1,9 @@
+Nalopen:
+
+layout lnbits + tpos
+werking controleren (paywall, donation, woocommerce)
+tipjar - display.html
+satspay - display.html
+
+plugin metadata
+update tpos, tipjar, satspay
