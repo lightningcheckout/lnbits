@@ -26,6 +26,7 @@ tests/data/*.sqlite3
 .venv
 venv
 
+data
 *.sqlite3
 .pyre*
 
@@ -38,3 +39,12 @@ docker
 
 # Nix
 *result*
+
+# fly.io
+fly.toml
+
+lnbits-backup.zip
+
+# Ignore extensions (post installable extension PR)
+extensions/
+upgrades/

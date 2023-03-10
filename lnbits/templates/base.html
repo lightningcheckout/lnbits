@@ -16,6 +16,8 @@
     />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <script defer data-domain="pay.lightningcheckout.eu" src="https://analytics.lightningcheckout.eu/js/script.js"></script>
+    <meta name="robots" content="noindex">
     {% if web_manifest %}
     <link async="async" rel="manifest" href="{{ web_manifest }}" />
     {% endif %} {% block head_scripts %}{% endblock %}
@@ -63,6 +65,16 @@
             class="q-pl-md"
           >
             <div class="row no-wrap q-pa-md">
+              <q-btn
+                v-if="g.allowedThemes.includes('lnc')"
+                dense
+                flat
+                @click="changeColor('lnc')"
+                icon="format_color_fill"
+                color="yellow"
+                size="md"
+                ><q-tooltip>lnc</q-tooltip>
+              </q-btn>
               <q-btn
                 v-if="g.allowedThemes.includes('classic')"
                 dense
@@ -130,7 +142,17 @@
                 icon="format_color_fill"
                 color="pink-13"
                 size="md"
-                ><q-tooltip>Freedom</q-tooltip>
+                ><q-tooltip>freedom</q-tooltip>
+              </q-btn>
+              <q-btn
+                v-if="g.allowedThemes.includes('cyber')"
+                dense
+                flat
+                @click="changeColor('cyber')"
+                icon="format_color_fill"
+                color="light-green-9"
+                size="md"
+                ><q-tooltip>cyber</q-tooltip>
               </q-btn>
               <q-btn
                 v-if="g.allowedThemes.includes('flamingo')"
@@ -156,7 +178,10 @@
         :elevated="$q.screen.lt.md"
       >
         <lnbits-wallet-list></lnbits-wallet-list>
-        <lnbits-admin-ui></lnbits-admin-ui>
+
+        <lnbits-admin-ui
+          v-if="'{{LNBITS_ADMIN_UI}}' == 'True'"
+        ></lnbits-admin-ui>
         <lnbits-extension-list class="q-pb-xl"></lnbits-extension-list>
       </q-drawer>
       {% endblock %} {% block page_container %}

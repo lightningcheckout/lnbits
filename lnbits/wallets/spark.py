@@ -97,7 +97,7 @@ class SparkWallet(Wallet):
         unhashed_description: Optional[bytes] = None,
         **kwargs,
     ) -> InvoiceResponse:
-        label = "lbs{}".format(random.random())
+        label = f"lbs{random.random()}"
         checking_id = label
 
         try:
@@ -119,6 +119,7 @@ class SparkWallet(Wallet):
                     label=label,
                     description=memo or "",
                     exposeprivatechannels=True,
+                    expiry=kwargs.get("expiry"),
                 )
             ok, payment_request, error_message = True, r["bolt11"], ""
         except (SparkError, UnknownError) as e:
@@ -160,7 +161,6 @@ class SparkWallet(Wallet):
                     # this may result in an error if it was paid previously
                     # our database won't allow the same payment_hash to be added twice
                     # this is good
-                    pass
 
         fee_msat = -int(r["msatoshi_sent"] - r["msatoshi"])
         preimage = r["payment_preimage"]
@@ -200,8 +200,9 @@ class SparkWallet(Wallet):
         if r["pays"][0]["payment_hash"] == checking_id:
             status = r["pays"][0]["status"]
             if status == "complete":
-                fee_msat = -int(
-                    r["pays"][0]["amount_sent_msat"] - r["pays"][0]["amount_msat"]
+                fee_msat = -(
+                    int(r["pays"][0]["amount_sent_msat"][0:-4])
+                    - int(r["pays"][0]["amount_msat"][0:-4])
                 )
                 return PaymentStatus(True, fee_msat, r["pays"][0]["preimage"])
             elif status == "failed":
