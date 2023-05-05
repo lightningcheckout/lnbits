@@ -2,12 +2,9 @@
 
 <html lang="en">
   <head>
-    {% for url in VENDORED_CSS %}
+    {% for url in INCLUDED_CSS %}
     <link rel="stylesheet" type="text/css" href="{{ url }}" />
-    {% endfor %}
-    <!---->
-    <link rel="stylesheet" type="text/css" href="/static/css/base.css" />
-    {% block styles %}{% endblock %}
+    {% endfor %} {% block styles %}{% endblock %}
     <title>{% block title %}{{ SITE_TITLE }}{% endblock %}</title>
     <meta charset="utf-8" />
     <meta
@@ -25,7 +22,6 @@
 
   <body data-theme="bitcoin">
     <q-layout id="vue" view="hHh lpR lfr" v-cloak>
-    {% block header %}
       <q-header bordered class="bg-marginal-bg">
         <q-toolbar>
           {% block drawer_toggle %}
@@ -53,7 +49,7 @@
             text-color="white"
             class="q-mr-md"
           >
-            <span> OFFLINE </span>
+            <span>OFFLINE</span>
           </q-badge>
           <q-btn-dropdown
             v-if="g.allowedThemes && g.allowedThemes.length > 1"
@@ -167,7 +163,6 @@
             </div>
           </q-btn-dropdown>
         </q-toolbar>
-      {% endblock %}
       </q-header>
       {% block drawer %}
       <q-drawer
@@ -200,36 +195,15 @@
           <q-toolbar-title class="text-caption">
             {{ SITE_TITLE }}, {{SITE_TAGLINE}}
             <br />
-
-            <small v-if="'{{SITE_TITLE}}' == 'LNbits'"
-              >Commit version: {{LNBITS_VERSION}}</small
+            <small
+              >{% raw %}{{ $t('lnbits_version') }}{% endraw %}:
+              {{LNBITS_VERSION}},
+            </small>
+            <small
+              >{% raw %}{{ $t('commit_version') }}{% endraw %}:
+              {{COMMIT_VERSION}}</small
             >
           </q-toolbar-title>
-          <q-space></q-space>
-          <q-btn
-            flat
-            dense
-            :color="($q.dark.isActive) ? 'white' : 'primary'"
-            type="a"
-            href="/docs"
-            target="_blank"
-            rel="noopener"
-          >
-            API DOCS
-            <q-tooltip>View LNbits Swagger API docs</q-tooltip>
-          </q-btn>
-          <q-btn
-            flat
-            dense
-            :color="($q.dark.isActive) ? 'white' : 'primary'"
-            icon="code"
-            type="a"
-            href="https://github.com/lnbits/lnbits"
-            target="_blank"
-            rel="noopener"
-          >
-            <q-tooltip>View project in GitHub</q-tooltip>
-          </q-btn>
         </q-toolbar>
       </q-footer>
 
@@ -238,12 +212,10 @@
 
     {% block vue_templates %}{% endblock %}
     <!---->
-    {% for url in VENDORED_JS %}
+    {% for url in INCLUDED_JS %}
     <script src="{{ url }}"></script>
     {% endfor %}
     <!---->
-    <script src="/static/js/base.js"></script>
-    <script src="/static/js/components.js"></script>
     <script type="text/javascript">
       const themes = {{ LNBITS_THEME_OPTIONS  | tojson }}
       const LNBITS_DENOMINATION = {{ LNBITS_DENOMINATION   | tojson}}

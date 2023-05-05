@@ -1,6 +1,6 @@
 .PHONY: test
 
-all: format check requirements.txt
+all: format check
 
 format: prettier isort black
 
@@ -50,14 +50,6 @@ test-real-wallet:
 	DEBUG=true \
 	poetry run pytest
 
-test-venv:
-	LNBITS_BACKEND_WALLET_CLASS="FakeWallet" \
-	FAKE_WALLET_SECRET="ToTheMoon1" \
-	LNBITS_DATA_FOLDER="./tests/data" \
-	PYTHONUNBUFFERED=1 \
-	DEBUG=true \
-	./venv/bin/pytest --durations=1 -s --cov=lnbits --cov-report=xml tests
-
 test-migration:
 	rm -rf ./migration-data
 	mkdir -p ./migration-data
@@ -79,3 +71,21 @@ migration:
 
 bak:
 	# LNBITS_DATABASE_URL=postgres://postgres:postgres@0.0.0.0:5432/postgres
+	#
+
+sass:
+	npm run sass
+
+bundle:
+	npm install
+	npm run sass
+	npm run vendor_copy
+	npm run vendor_json
+	poetry run ./node_modules/.bin/prettier -w ./lnbits/static/vendor.json
+	npm run vendor_bundle_css
+	npm run vendor_minify_css
+	npm run vendor_bundle_js
+	npm run vendor_minify_js
+	# increment serviceworker version
+	sed -i -e "s/CACHE_VERSION =.*/CACHE_VERSION = $$(awk '/CACHE_VERSION =/ { print 1+$$4 }' lnbits/core/static/js/service-worker.js)/" \
+		lnbits/core/static/js/service-worker.js

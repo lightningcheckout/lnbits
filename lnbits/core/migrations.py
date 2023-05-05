@@ -107,7 +107,7 @@ async def m002_add_fields_to_apipayments(db):
                 continue
 
             for ext in ["withdraw", "events", "lnticket", "paywall", "tpos"]:
-                prefix = "#" + ext + " "
+                prefix = f"#{ext} "
                 if row["memo"].startswith(prefix):
                     new = row["memo"][len(prefix) :]
                     await db.execute(
@@ -168,7 +168,8 @@ async def m004_ensure_fees_are_always_negative(db):
 
 async def m005_balance_check_balance_notify(db):
     """
-    Keep track of balanceCheck-enabled lnurl-withdrawals to be consumed by an LNbits wallet and of balanceNotify URLs supplied by users to empty their wallets.
+    Keep track of balanceCheck-enabled lnurl-withdrawals to be consumed by an
+    LNbits wallet and of balanceNotify URLs supplied by users to empty their wallets.
     """
 
     await db.execute(
