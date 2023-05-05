@@ -22,6 +22,7 @@ RUN mkdir data
 
 RUN poetry config virtualenvs.create false
 RUN poetry install --only main
+RUN poetry run python tools/build.py
 
 ENV LNBITS_PORT="5000"
 ENV LNBITS_HOST="0.0.0.0"
