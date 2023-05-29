@@ -146,20 +146,47 @@ new Vue({
       paymentsTable: {
         columns: [
           {
+            name: 'time',
+            align: 'left',
+            label: this.$t('memo') + '/' + this.$t('date'),
+            field: 'date',
+            sortable: true
+          },
+          {
+            name: 'amount',
+            align: 'right',
+            label: this.$t('amount') + ' (' + LNBITS_DENOMINATION + ')',
+            field: 'sat',
+            sortable: true
+          }
+        ],
+        pagination: {
+          rowsPerPage: 10,
+          page: 1,
+          sortBy: 'time',
+          descending: true,
+          rowsNumber: 10
+        },
+        filter: null,
+        loading: false
+      },
+      paymentsCSV: {
+        columns: [
+          {
             name: 'memo',
             align: 'left',
             label: this.$t('memo'),
             field: 'memo'
           },
           {
-            name: 'date',
+            name: 'time',
             align: 'left',
             label: this.$t('date'),
             field: 'date',
             sortable: true
           },
           {
-            name: 'sat',
+            name: 'amount',
             align: 'right',
             label: this.$t('amount') + ' (' + LNBITS_DENOMINATION + ')',
             field: 'sat',
@@ -170,12 +197,34 @@ new Vue({
             align: 'right',
             label: this.$t('fee') + ' (m' + LNBITS_DENOMINATION + ')',
             field: 'fee'
+          },
+          {
+            name: 'tag',
+            align: 'right',
+            label: this.$t('tag'),
+            field: 'tag'
+          },
+          {
+            name: 'payment_hash',
+            align: 'right',
+            label: this.$t('payment_hash'),
+            field: 'payment_hash'
+          },
+          {
+            name: 'payment_proof',
+            align: 'right',
+            label: this.$t('payment_proof'),
+            field: 'payment_proof'
+          },
+          {
+            name: 'webhook',
+            align: 'right',
+            label: this.$t('webhook'),
+            field: 'webhook'
           }
         ],
-        pagination: {
-          rowsPerPage: 10
-        },
-        filter: null
+        filter: null,
+        loading: false
       },
       paymentsChart: {
         show: false
@@ -695,16 +744,35 @@ new Vue({
           LNbits.href.deleteWallet(walletId, user)
         })
     },
-    fetchPayments: function () {
-      return LNbits.api.getPayments(this.g.wallet).then(response => {
-        this.payments = response.data
-          .map(obj => {
+    fetchPayments: function (props) {
+      // Props are passed by qasar when pagination or sorting changes
+      if (props) {
+        this.paymentsTable.pagination = props.pagination
+      }
+      let pagination = this.paymentsTable.pagination
+      this.paymentsTable.loading = true
+      const query = {
+        limit: pagination.rowsPerPage,
+        offset: (pagination.page - 1) * pagination.rowsPerPage,
+        sortby: pagination.sortBy ?? 'time',
+        direction: pagination.descending ? 'desc' : 'asc'
+      }
+      if (this.paymentsTable.filter) {
+        query.search = this.paymentsTable.filter
+      }
+      return LNbits.api
+        .getPayments(this.g.wallet, query)
+        .then(response => {
+          this.paymentsTable.loading = false
+          this.paymentsTable.pagination.rowsNumber = response.data.total
+          this.payments = response.data.data.map(obj => {
             return LNbits.map.payment(obj)
           })
-          .sort((a, b) => {
-            return b.time - a.time
-          })
-      })
+        })
+        .catch(err => {
+          this.paymentsTable.loading = false
+          LNbits.utils.notifyApiError(err)
+        })
     },
     fetchBalance: function () {
       LNbits.api.getWallet(this.g.wallet).then(response => {
@@ -719,7 +787,7 @@ new Vue({
       // status is important for export but it is not in paymentsTable
       // because it is manually added with payment detail link and icons
       // and would cause duplication in the list
-      let columns = structuredClone(this.paymentsTable.columns)
+      let columns = structuredClone(this.paymentsCSV.columns)
       columns.unshift({
         name: 'pending',
         align: 'left',

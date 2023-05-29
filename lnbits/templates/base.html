@@ -45,6 +45,11 @@
               <span><strong>LN</strong>bits</span> {% endif %} {%endif%} {%
               endblock %}
             </q-btn>
+            {% block toolbar_subtitle %}{%if user and user.super_user%}
+            <q-badge align="middle">Super User</q-badge>
+            {% elif user and user.admin %}
+            <q-badge align="middle">Admin User</q-badge>
+            {%endif%}{% endblock %}
           </q-toolbar-title>
           <q-badge
             v-if="g.offline"
@@ -206,9 +211,9 @@
     {% endfor %}
     <!---->
     <script type="text/javascript">
-      const themes = {{ LNBITS_THEME_OPTIONS  | tojson }}
-      const LNBITS_DENOMINATION = {{ LNBITS_DENOMINATION   | tojson}}
-      if(themes && themes.length) {
+      const themes = {{ LNBITS_THEME_OPTIONS | tojson }}
+      const LNBITS_DENOMINATION = {{ LNBITS_DENOMINATION | tojson }}
+      if (themes && themes.length) {
         window.allowedThemes = themes.map(str => str.trim())
       }
     </script>
