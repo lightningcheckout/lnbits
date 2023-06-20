@@ -25,6 +25,7 @@ class ExplicitRelease(BaseModel):
     archive: str
     hash: str
     dependencies: List[str] = []
+    repo: Optional[str]
     icon: Optional[str]
     short_description: Optional[str]
     min_lnbits_version: Optional[str]
@@ -98,18 +99,18 @@ async def fetch_github_repo_info(
 ) -> Tuple[GitHubRepo, GitHubRepoRelease, ExtensionConfig]:
     repo_url = f"https://api.github.com/repos/{org}/{repository}"
     error_msg = "Cannot fetch extension repo"
-    repo = await gihub_api_get(repo_url, error_msg)
+    repo = await github_api_get(repo_url, error_msg)
     github_repo = GitHubRepo.parse_obj(repo)
 
     lates_release_url = (
         f"https://api.github.com/repos/{org}/{repository}/releases/latest"
     )
     error_msg = "Cannot fetch extension releases"
-    latest_release: Any = await gihub_api_get(lates_release_url, error_msg)
+    latest_release: Any = await github_api_get(lates_release_url, error_msg)
 
     config_url = f"https://raw.githubusercontent.com/{org}/{repository}/{github_repo.default_branch}/config.json"
     error_msg = "Cannot fetch config for extension"
-    config = await gihub_api_get(config_url, error_msg)
+    config = await github_api_get(config_url, error_msg)
 
     return (
         github_repo,
@@ -120,14 +121,14 @@ async def fetch_github_repo_info(
 
 async def fetch_manifest(url) -> Manifest:
     error_msg = "Cannot fetch extensions manifest"
-    manifest = await gihub_api_get(url, error_msg)
+    manifest = await github_api_get(url, error_msg)
     return Manifest.parse_obj(manifest)
 
 
 async def fetch_github_releases(org: str, repo: str) -> List[GitHubRepoRelease]:
     releases_url = f"https://api.github.com/repos/{org}/{repo}/releases"
     error_msg = "Cannot fetch extension releases"
-    releases = await gihub_api_get(releases_url, error_msg)
+    releases = await github_api_get(releases_url, error_msg)
     return [GitHubRepoRelease.parse_obj(r) for r in releases]
 
 
@@ -138,11 +139,11 @@ async def fetch_github_release_config(
         f"https://raw.githubusercontent.com/{org}/{repo}/{tag_name}/config.json"
     )
     error_msg = "Cannot fetch GitHub extension config"
-    config = await gihub_api_get(config_url, error_msg)
+    config = await github_api_get(config_url, error_msg)
     return ExtensionConfig.parse_obj(config)
 
 
-async def gihub_api_get(url: str, error_msg: Optional[str]) -> Any:
+async def github_api_get(url: str, error_msg: Optional[str]) -> Any:
     async with httpx.AsyncClient() as client:
         headers = (
             {"Authorization": "Bearer " + settings.lnbits_ext_github_token}
@@ -254,6 +255,7 @@ class ExtensionRelease(BaseModel):
     html_url: Optional[str] = None
     description: Optional[str] = None
     warning: Optional[str] = None
+    repo: Optional[str] = None
     icon: Optional[str] = None
 
     @classmethod
@@ -267,7 +269,7 @@ class ExtensionRelease(BaseModel):
             archive=r.zipball_url,
             source_repo=source_repo,
             is_github_release=True,
-            # description=r.body, # bad for JSON
+            repo=f"https://github.com/{source_repo}",
             html_url=r.html_url,
         )
 
@@ -286,6 +288,7 @@ class ExtensionRelease(BaseModel):
             is_version_compatible=e.is_version_compatible(),
             warning=e.warning,
             html_url=e.html_url,
+            repo=e.repo,
             icon=e.icon,
         )
 

@@ -21,6 +21,7 @@ from lnbits.settings import (
     get_wallet_class,
     readonly_variables,
     send_admin_user_to_saas,
+    set_wallet_class,
     settings,
 )
 from lnbits.wallets.base import PaymentResponse, PaymentStatus
@@ -37,6 +38,7 @@ from .crud import (
     get_account,
     get_standalone_payment,
     get_super_settings,
+    get_total_balance,
     get_wallet,
     get_wallet_payment,
     update_payment_details,
@@ -464,12 +466,7 @@ async def check_admin_settings():
 
         update_cached_settings(settings_db.dict())
 
-        # printing settings for debugging
-        logger.debug("Admin settings:")
-        for key, value in settings.dict(exclude_none=True).items():
-            logger.debug(f"{key}: {value}")
-
-        admin_url = f"{settings.lnbits_baseurl}wallet?usr={settings.super_user}"
+        admin_url = f'{settings.lnbits_baseurl}wallet?usr=<ID from ".super_user" file>'
         logger.success(f"✔️ Access super user account at: {admin_url}")
 
         # saving it to .super_user file
@@ -516,7 +513,6 @@ class WebsocketConnectionManager:
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        logger.debug(websocket)
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
@@ -533,3 +529,20 @@ websocketManager = WebsocketConnectionManager()
 
 async def websocketUpdater(item_id, data):
     return await websocketManager.send_data(f"{data}", item_id)
+
+
+async def switch_to_voidwallet() -> None:
+    WALLET = get_wallet_class()
+    if WALLET.__class__.__name__ == "VoidWallet":
+        return
+    set_wallet_class("VoidWallet")
+    settings.lnbits_backend_wallet_class = "VoidWallet"
+
+
+async def get_balance_delta() -> Tuple[int, int, int]:
+    WALLET = get_wallet_class()
+    total_balance = await get_total_balance()
+    error_message, node_balance = await WALLET.status()
+    if error_message:
+        raise Exception(error_message)
+    return node_balance - total_balance, node_balance, total_balance

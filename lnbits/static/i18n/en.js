@@ -1,4 +1,5 @@
 window.localisation.en = {
+  confirm: 'Yes',
   server: 'Server',
   theme: 'Theme',
   funding: 'Funding',
@@ -86,6 +87,7 @@ window.localisation.en = {
   manage_extension_details: 'Install/uninstall extension',
   install: 'Install',
   uninstall: 'Uninstall',
+  drop_db: 'Remove Data',
   open: 'Open',
   enable: 'Enable',
   enable_extension_details: 'Enable extension for current user',
@@ -98,6 +100,7 @@ window.localisation.en = {
   featured: 'Featured',
   all: 'All',
   only_admins_can_install: '(Only admin accounts can install extensions)',
+  admin_only: 'Admin Only',
   new_version: 'New Version',
   extension_depends_on: 'Depends on:',
   extension_rating_soon: 'Ratings coming soon',
@@ -105,6 +108,11 @@ window.localisation.en = {
   extension_uninstall_warning:
     'You are about to remove the extension for all users.',
   uninstall_confirm: 'Yes, Uninstall',
+  extension_db_drop_info:
+    'All data for the extension will be permanently deleted. There is no way to undo this operation!',
+  extension_db_drop_warning:
+    'You are about to remove all data for the extension. Please type the extension name to continue:',
+
   extension_min_lnbits_version: 'This release requires at least LNbits version',
 
   payment_hash: 'Payment Hash',
@@ -114,5 +122,52 @@ window.localisation.en = {
   description: 'Description',
   expiry: 'Expiry',
   webhook: 'Webhook',
-  payment_proof: 'Payment Proof'
+  payment_proof: 'Payment Proof',
+  update_available: 'Update %{version} available!',
+  latest_update: 'You are on the latest version %{version}.',
+  notifications: 'Notifications',
+  no_notifications: 'No notifications',
+  notifications_disabled: 'LNbits status notifications are disabled.',
+  enable_notifications: 'Enable Notifications',
+  enable_notifications_desc:
+    'If enabled it will fetch the latest LNbits Status updates, like security incidents and updates.',
+  enable_killswitch: 'Enable Killswitch',
+  enable_killswitch_desc:
+    'If enabled it will change your funding source to VoidWallet automatically if LNbits sends out a killswitch signal. You will need to enable manually after an update.',
+  killswitch_interval: 'Killswitch Interval',
+  killswitch_interval_desc:
+    'How often the background task should check for the LNBits killswitch signal from the status source (in minutes).',
+  enable_watchdog: 'Enable Watchdog',
+  enable_watchdog_desc:
+    'If enabled it will change your funding source to VoidWallet automatically if your balance is lower than the LNbits balance. You will need to enable manually after an update.',
+  watchdog_interval: 'Watchdog Interval',
+  watchdog_interval_desc:
+    'How often the background task should check for a killswitch signal in the watchdog delta [node_balance - lnbits_balance] (in minutes).',
+  watchdog_delta: 'Watchdog Delta',
+  watchdog_delta_desc:
+    'Limit before killswitch changes funding source to VoidWallet [lnbits_balance - node_balance > delta]',
+  status: 'Status',
+  notification_source: 'Notification Source',
+  notification_source_label:
+    'Source URL (only use the official LNbits status source, and sources you can trust)',
+  more: 'more',
+  releases: 'Releases',
+  killswitch: 'Killswitch',
+  watchdog: 'Watchdog',
+  server_logs: 'Server Logs',
+  ip_blocker: 'IP Blocker',
+  security: 'Security',
+  security_tools: 'Security tools',
+  block_access_hint: 'Block access by IP',
+  allow_access_hint: 'Allow access by IP (will override blocked IPs)',
+  enter_ip: 'Enter IP and hit enter',
+  rate_limiter: 'Rate Limiter',
+  number_of_requests: 'Number of requests',
+  time_unit: 'Time unit',
+  minute: 'minute',
+  second: 'second',
+  hour: 'hour',
+  disable_server_log: 'Disable Server Log',
+  enable_server_log: 'Enable Server Log',
+  coming_soon: 'Feature coming soon'
 }

@@ -241,6 +241,15 @@ window.LNbits = {
         }
       })
     },
+    digestMessage: async function (message) {
+      const msgUint8 = new TextEncoder().encode(message)
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8)
+      const hashArray = Array.from(new Uint8Array(hashBuffer))
+      const hashHex = hashArray
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+      return hashHex
+    },
     formatCurrency: function (value, currency) {
       return new Intl.NumberFormat(window.LOCALE, {
         style: 'currency',
@@ -350,6 +359,9 @@ window.windowMixin = {
   },
 
   methods: {
+    activeLanguage: function (lang) {
+      return window.i18n.locale === lang
+    },
     changeLanguage: function (newValue) {
       window.i18n.locale = newValue
       this.$q.localStorage.set('lnbits.lang', newValue)

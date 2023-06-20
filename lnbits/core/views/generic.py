@@ -18,11 +18,13 @@ from lnbits.helpers import template_renderer, url_for
 from lnbits.settings import get_wallet_class, settings
 
 from ...extension_manager import InstallableExtension, get_valid_extensions
+from ...utils.exchange_rates import currencies
 from ..crud import (
     create_account,
     create_wallet,
     delete_wallet,
     get_balance_check,
+    get_dbversions,
     get_inactive_extensions,
     get_installed_extensions,
     get_user,
@@ -113,6 +115,7 @@ async def extensions_install(
 
         all_extensions = list(map(lambda e: e.code, get_valid_extensions()))
         inactive_extensions = await get_inactive_extensions()
+        db_version = await get_dbversions()
         extensions = list(
             map(
                 lambda ext: {
@@ -124,7 +127,9 @@ async def extensions_install(
                     "isFeatured": ext.featured,
                     "dependencies": ext.dependencies,
                     "isInstalled": ext.id in installed_exts_ids,
+                    "hasDatabaseTables": ext.id in db_version,
                     "isAvailable": ext.id in all_extensions,
+                    "isAdminOnly": ext.id in settings.lnbits_admin_extensions,
                     "isActive": ext.id not in inactive_extensions,
                     "latestRelease": dict(ext.latest_release)
                     if ext.latest_release
@@ -396,6 +401,7 @@ async def index(request: Request, user: User = Depends(check_admin)):
             "user": user.dict(),
             "settings": settings.dict(),
             "balance": balance,
+            "currencies": list(currencies.keys()),
         },
     )
 
