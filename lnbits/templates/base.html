@@ -170,18 +170,6 @@
               </q-btn>
             </div>
           </q-btn-dropdown>
-                  <q-btn
-            dense
-            flat
-            round
-            @click="toggleDarkMode"
-            :icon="($q.dark.isActive) ? 'brightness_3' : 'wb_sunny'"
-            size="sm"
-          >
-            <q-tooltip
-              >{% raw %}{{ $t('toggle_darkmode') }}{% endraw %}</q-tooltip
-            >
-          </q-btn>
         </q-toolbar>
       </q-header>
       {% block drawer %}
