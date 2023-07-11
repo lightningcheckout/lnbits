@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.10-slim-bullseye
 
 RUN apt-get clean
 RUN apt-get update
@@ -12,8 +12,7 @@ RUN apt-get install -y wget
 RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 RUN wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
 RUN apt-get update
-RUN apt-get install libpq5, libssl1.1
-RUN apt-get install -y postgresql-client-14
+RUN apt-get install -y postgresql-client-15
 
 WORKDIR /app
 
