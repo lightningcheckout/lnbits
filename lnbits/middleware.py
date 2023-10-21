@@ -2,14 +2,15 @@ from http import HTTPStatus
 from typing import Any, List, Tuple, Union
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from lnbits.core import core_app_extra
+from lnbits.core.db import core_app_extra
 from lnbits.helpers import template_renderer
 from lnbits.settings import settings
 
@@ -17,7 +18,8 @@ from lnbits.settings import settings
 class InstalledExtensionMiddleware:
     # This middleware class intercepts calls made to the extensions API and:
     #  - it blocks the calls if the extension has been disabled or uninstalled.
-    #  - it redirects the calls to the latest version of the extension if the extension has been upgraded.
+    #  - it redirects the calls to the latest version of the extension
+    #    if the extension has been upgraded.
     #  - otherwise it has no effect
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -88,9 +90,10 @@ class InstalledExtensionMiddleware:
         self, headers: List[Any], msg: str, status_code: HTTPStatus
     ) -> Union[HTMLResponse, JSONResponse]:
         """
-        Build an HTTP response containing the `msg` as HTTP body and the `status_code` as HTTP code.
-        If the `accept` HTTP header is present int the request and contains the value of `text/html`
-        then return an `HTMLResponse`, otherwise return an `JSONResponse`.
+        Build an HTTP response containing the `msg` as HTTP body and the `status_code`
+        as HTTP code. If the `accept` HTTP header is present int the request and
+        contains the value of `text/html` then return an `HTMLResponse`,
+        otherwise return an `JSONResponse`.
         """
         accept_header: str = next(
             (
@@ -115,9 +118,21 @@ class InstalledExtensionMiddleware:
         )
 
 
+class CustomGZipMiddleware(GZipMiddleware):
+    def __init__(self, *args, exclude_paths=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.exclude_paths = exclude_paths or []
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if "path" in scope and scope["path"] in self.exclude_paths:
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
+
 class ExtensionsRedirectMiddleware:
-    # Extensions are allowed to specify redirect paths.
-    # A call to a path outside the scope of the extension can be redirected to one of the extension's endpoints.
+    # Extensions are allowed to specify redirect paths. A call to a path outside the
+    # scope of the extension can be redirected to one of the extension's endpoints.
     # Eg: redirect `GET /.well-known` to `GET /lnurlp/api/v1/well-known`
 
     def __init__(self, app: ASGIApp) -> None:
@@ -218,14 +233,6 @@ def add_ip_block_middleware(app: FastAPI):
                 status_code=403,  # Forbidden
                 content={"detail": "IP is blocked"},
             )
-        # this try: except: block is not needed on latest FastAPI (await call_next(request) is enough)
-        # https://stackoverflow.com/questions/71222144/runtimeerror-no-response-returned-in-fastapi-when-refresh-request
-        # TODO: remove after https://github.com/lnbits/lnbits/pull/1609 is merged
-        try:
-            return await call_next(request)
-        except RuntimeError as exc:
-            if str(exc) == "No response returned." and await request.is_disconnected():
-                return Response(status_code=HTTPStatus.NO_CONTENT)
-            raise  # bubble up different exceptions
+        return await call_next(request)
 
     app.middleware("http")(block_allow_ip_middleware)

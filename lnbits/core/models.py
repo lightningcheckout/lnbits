@@ -3,10 +3,13 @@ import hashlib
 import hmac
 import json
 import time
+from dataclasses import dataclass
+from enum import Enum
 from sqlite3 import Row
 from typing import Callable, Dict, List, Optional
 
 from ecdsa import SECP256k1, SigningKey
+from fastapi import Query
 from lnurl import encode as lnurl_encode
 from loguru import logger
 from pydantic import BaseModel
@@ -24,7 +27,9 @@ class Wallet(BaseModel):
     user: str
     adminkey: str
     inkey: str
+    currency: Optional[str]
     balance_msat: int
+    deleted: bool
 
     @property
     def balance(self) -> int:
@@ -41,7 +46,7 @@ class Wallet(BaseModel):
         url = url_for("/withdraw", external=True, usr=self.user, wal=self.id)
         try:
             return lnurl_encode(url)
-        except:
+        except Exception:
             return ""
 
     def lnurlauth_key(self, domain: str) -> SigningKey:
@@ -56,6 +61,22 @@ class Wallet(BaseModel):
         from .crud import get_standalone_payment
 
         return await get_standalone_payment(payment_hash)
+
+
+class WalletType(Enum):
+    admin = 0
+    invoice = 1
+    invalid = 2
+
+    # backwards compatibility
+    def __eq__(self, other):
+        return self.value == other
+
+
+@dataclass
+class WalletTypeInfo:
+    wallet_type: WalletType
+    wallet: Wallet
 
 
 class User(BaseModel):
@@ -169,6 +190,8 @@ class Payment(FromRowModel):
     async def set_pending(self, pending: bool) -> None:
         from .crud import update_payment_status
 
+        self.pending = pending
+
         await update_payment_status(self.checking_id, pending)
 
     async def check_status(
@@ -179,7 +202,8 @@ class Payment(FromRowModel):
             return PaymentStatus(None)
 
         logger.debug(
-            f"Checking {'outgoing' if self.is_out else 'incoming'} pending payment {self.checking_id}"
+            f"Checking {'outgoing' if self.is_out else 'incoming'} "
+            f"pending payment {self.checking_id}"
         )
 
         WALLET = get_wallet_class()
@@ -193,7 +217,8 @@ class Payment(FromRowModel):
         if self.is_in and status.pending and self.is_expired and self.expiry:
             expiration_date = datetime.datetime.fromtimestamp(self.expiry)
             logger.debug(
-                f"Deleting expired incoming pending payment {self.checking_id}: expired {expiration_date}"
+                f"Deleting expired incoming pending payment {self.checking_id}: "
+                f"expired {expiration_date}"
             )
             await self.delete(conn)
         elif self.is_out and status.failed:
@@ -203,15 +228,16 @@ class Payment(FromRowModel):
             await self.delete(conn)
         elif not status.pending:
             logger.info(
-                f"Marking '{'in' if self.is_in else 'out'}' {self.checking_id} as not pending anymore: {status}"
+                f"Marking '{'in' if self.is_in else 'out'}' "
+                f"{self.checking_id} as not pending anymore: {status}"
             )
             await self.update_status(status, conn=conn)
         return status
 
     async def delete(self, conn: Optional[Connection] = None) -> None:
-        from .crud import delete_payment
+        from .crud import delete_wallet_payment
 
-        await delete_payment(self.checking_id, conn=conn)
+        await delete_wallet_payment(self.checking_id, self.wallet_id, conn=conn)
 
 
 class PaymentFilters(FilterModel):
@@ -230,6 +256,13 @@ class PaymentFilters(FilterModel):
     wallet_id: str
     webhook: Optional[str]
     webhook_status: Optional[int]
+
+
+class PaymentHistoryPoint(BaseModel):
+    date: datetime.datetime
+    income: int
+    spending: int
+    balance: int
 
 
 class BalanceCheck(BaseModel):
@@ -257,3 +290,66 @@ class TinyURL(BaseModel):
     @classmethod
     def from_row(cls, row: Row):
         return cls(**dict(row))
+
+
+class ConversionData(BaseModel):
+    from_: str = "sat"
+    amount: float
+    to: str = "usd"
+
+
+class Callback(BaseModel):
+    callback: str
+
+
+class DecodePayment(BaseModel):
+    data: str
+
+
+class CreateLnurl(BaseModel):
+    description_hash: str
+    callback: str
+    amount: int
+    comment: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CreateInvoice(BaseModel):
+    unit: str = "sat"
+    internal: bool = False
+    out: bool = True
+    amount: float = Query(None, ge=0)
+    memo: Optional[str] = None
+    description_hash: Optional[str] = None
+    unhashed_description: Optional[str] = None
+    expiry: Optional[int] = None
+    lnurl_callback: Optional[str] = None
+    lnurl_balance_check: Optional[str] = None
+    extra: Optional[dict] = None
+    webhook: Optional[str] = None
+    bolt11: Optional[str] = None
+
+
+class CreateTopup(BaseModel):
+    id: str
+    amount: int
+
+
+class CreateLnurlAuth(BaseModel):
+    callback: str
+
+
+class CreateWallet(BaseModel):
+    name: Optional[str] = None
+
+
+class CreateWebPushSubscription(BaseModel):
+    subscription: str
+
+
+class WebPushSubscription(BaseModel):
+    endpoint: str
+    user: str
+    data: str
+    host: str
+    timestamp: str

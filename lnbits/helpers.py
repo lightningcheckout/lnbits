@@ -4,13 +4,11 @@ from typing import Any, List, Optional, Type
 
 import jinja2
 import shortuuid
-from pydantic.schema import (
-    field_schema,
-    get_flat_models_from_fields,
-    get_model_name_map,
-)
+from pydantic import BaseModel
+from pydantic.schema import field_schema
 
 from lnbits.jinja2_templating import Jinja2Templates
+from lnbits.nodes import get_node_class
 from lnbits.requestvars import g
 from lnbits.settings import settings
 
@@ -34,6 +32,10 @@ def url_for(endpoint: str, external: Optional[bool] = False, **params: Any) -> s
 def template_renderer(additional_folders: Optional[List] = None) -> Jinja2Templates:
     folders = ["lnbits/templates", "lnbits/core/templates"]
     if additional_folders:
+        additional_folders += [
+            Path(settings.lnbits_extensions_path, "extensions", f)
+            for f in additional_folders
+        ]
         folders.extend(additional_folders)
     t = Jinja2Templates(loader=jinja2.FileSystemLoader(folders))
 
@@ -48,9 +50,14 @@ def template_renderer(additional_folders: Optional[List] = None) -> Jinja2Templa
     t.env.globals["SITE_TAGLINE"] = settings.lnbits_site_tagline
     t.env.globals["SITE_DESCRIPTION"] = settings.lnbits_site_description
     t.env.globals["LNBITS_THEME_OPTIONS"] = settings.lnbits_theme_options
-    t.env.globals["COMMIT_VERSION"] = settings.lnbits_commit
+    t.env.globals["LNBITS_QR_LOGO"] = settings.lnbits_qr_logo
     t.env.globals["LNBITS_VERSION"] = settings.version
+    t.env.globals["LNBITS_NEW_ACCOUNTS_ALLOWED"] = settings.new_accounts_allowed
     t.env.globals["LNBITS_ADMIN_UI"] = settings.lnbits_admin_ui
+    t.env.globals["LNBITS_NODE_UI"] = (
+        settings.lnbits_node_ui and get_node_class() is not None
+    )
+    t.env.globals["LNBITS_NODE_UI_AVAILABLE"] = get_node_class() is not None
     t.env.globals["EXTENSIONS"] = [
         e
         for e in get_valid_extensions()
@@ -68,6 +75,8 @@ def template_renderer(additional_folders: Optional[List] = None) -> Jinja2Templa
             vendor_files = json.loads(vendor_file.read())
             t.env.globals["INCLUDED_JS"] = vendor_files["js"]
             t.env.globals["INCLUDED_CSS"] = vendor_files["css"]
+
+    t.env.globals["WEBPUSH_PUBKEY"] = settings.lnbits_webpush_pubkey
 
     return t
 
@@ -90,32 +99,25 @@ def get_current_extension_name() -> str:
         with open(config_path) as json_file:
             config = json.load(json_file)
         ext_name = config["name"]
-    except:
+    except Exception:
         ext_name = extension_director_name
     return ext_name
 
 
 def generate_filter_params_openapi(model: Type[FilterModel], keep_optional=False):
     """
-    Generate openapi documentation for Filters. This is intended to be used along parse_filters (see example)
+    Generate openapi documentation for Filters. This is intended to be used along
+    parse_filters (see example)
     :param model: Filter model
-    :param keep_optional: If false, all parameters will be optional, otherwise inferred from model
+    :param keep_optional: If false, all parameters will be optional,
+    otherwise inferred from model
     """
     fields = list(model.__fields__.values())
-    models = get_flat_models_from_fields(fields, set())
-    namemap = get_model_name_map(models)
     params = []
     for field in fields:
-        schema, definitions, _ = field_schema(field, model_name_map=namemap)
-
-        # Support nested definition
-        if "$ref" in schema:
-            name = schema["$ref"].split("/")[-1]
-            schema = definitions[name]
+        schema, _, _ = field_schema(field, model_name_map={})
 
         description = "Supports Filtering"
-        if schema["type"] == "object":
-            description += f". Nested attributes can be filtered too, e.g. `{field.alias}.[additional].[attributes]`"
         if (
             hasattr(model, "__search_fields__")
             and field.name in model.__search_fields__
@@ -134,3 +136,25 @@ def generate_filter_params_openapi(model: Type[FilterModel], keep_optional=False
     return {
         "parameters": params,
     }
+
+
+def insert_query(table_name: str, model: BaseModel) -> str:
+    """
+    Generate an insert query with placeholders for a given table and model
+    :param table_name: Name of the table
+    :param model: Pydantic model
+    """
+    placeholders = ", ".join(["?"] * len(model.dict().keys()))
+    fields = ", ".join(model.dict().keys())
+    return f"INSERT INTO {table_name} ({fields}) VALUES ({placeholders})"
+
+
+def update_query(table_name: str, model: BaseModel, where: str = "WHERE id = ?") -> str:
+    """
+    Generate an update query with placeholders for a given table and model
+    :param table_name: Name of the table
+    :param model: Pydantic model
+    :param where: Where string, default to `WHERE id = ?`
+    """
+    query = ", ".join([f"{field} = ?" for field in model.dict().keys()])
+    return f"UPDATE {table_name} SET {query} {where}"

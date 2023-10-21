@@ -9,12 +9,12 @@ import sys
 import traceback
 from hashlib import sha256
 from http import HTTPStatus
+from pathlib import Path
 from typing import Callable, List
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from slowapi import Limiter
@@ -27,23 +27,22 @@ from lnbits.core.services import websocketUpdater
 from lnbits.core.tasks import (  # register_watchdog,; unregister_watchdog,
     register_killswitch,
     register_task_listeners,
-    unregister_killswitch,
 )
 from lnbits.settings import settings
+from lnbits.tasks import cancel_all_tasks, create_permanent_task
+from lnbits.utils.cache import cache
 from lnbits.wallets import get_wallet_class, set_wallet_class
 
 from .commands import db_versions, load_disabled_extension_list, migrate_databases
-from .core import (
-    add_installed_extension,
-    core_app,
-    core_app_extra,
-    update_installed_extension_state,
-)
-from .core.services import check_admin_settings
-from .core.views.generic import core_html_routes
+from .core import init_core_routers
+from .core.db import core_app_extra
+from .core.services import check_admin_settings, check_webpush_settings
+from .core.views.api import add_installed_extension
+from .core.views.generic import update_installed_extension_state
 from .extension_manager import Extension, InstallableExtension, get_valid_extensions
 from .helpers import template_renderer
 from .middleware import (
+    CustomGZipMiddleware,
     ExtensionsRedirectMiddleware,
     InstalledExtensionMiddleware,
     add_ip_block_middleware,
@@ -51,7 +50,6 @@ from .middleware import (
 )
 from .requestvars import g
 from .tasks import (
-    catch_everything_and_restart,
     check_pending_payments,
     internal_invoice_listener,
     invoice_listener,
@@ -62,14 +60,21 @@ from .tasks import (
 def create_app() -> FastAPI:
     configure_logger()
     app = FastAPI(
-        title="LNbits API",
-        description="API for LNbits, the free and open source bitcoin wallet and accounts system with plugins.",
+        title=settings.lnbits_title,
+        description=(
+            "API for LNbits, the free and open source bitcoin wallet and "
+            "accounts system with plugins."
+        ),
         version=settings.version,
         license_info={
             "name": "MIT License",
             "url": "https://raw.githubusercontent.com/lnbits/lnbits/main/LICENSE",
         },
     )
+
+    # Allow registering new extensions routes without direct access to the `app` object
+    setattr(core_app_extra, "register_new_ext_routes", register_new_ext_routes(app))
+    setattr(core_app_extra, "register_new_ratelimiter", register_new_ratelimiter(app))
 
     app.mount("/static", StaticFiles(packages=[("lnbits", "static")]), name="static")
     app.mount(
@@ -84,21 +89,25 @@ def create_app() -> FastAPI:
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
     )
 
-    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    app.add_middleware(
+        CustomGZipMiddleware, minimum_size=1000, exclude_paths=["/api/v1/payments/sse"]
+    )
 
     # order of these two middlewares is important
     app.add_middleware(InstalledExtensionMiddleware)
     app.add_middleware(ExtensionsRedirectMiddleware)
+
+    register_custom_extensions_path()
+
+    # adds security middleware
+    add_ip_block_middleware(app)
+    add_ratelimit_middleware(app)
 
     register_startup(app)
     register_routes(app)
     register_async_tasks(app)
     register_exception_handlers(app)
     register_shutdown(app)
-
-    # Allow registering new extensions routes without direct access to the `app` object
-    setattr(core_app_extra, "register_new_ext_routes", register_new_ext_routes(app))
-    setattr(core_app_extra, "register_new_ratelimiter", register_new_ratelimiter(app))
 
     return app
 
@@ -107,7 +116,9 @@ async def check_funding_source() -> None:
     original_sigint_handler = signal.getsignal(signal.SIGINT)
 
     def signal_handler(signal, frame):
-        logger.debug("SIGINT received, terminating LNbits.")
+        logger.debug(
+            f"SIGINT received, terminating LNbits. signal: {signal}, frame: {frame}"
+        )
         sys.exit(1)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -129,17 +140,16 @@ async def check_funding_source() -> None:
                 break
 
             logger.error(
-                f"The backend for {WALLET.__class__.__name__} isn't working properly: '{error_message}'",
+                f"The backend for {WALLET.__class__.__name__} isn't "
+                f"working properly: '{error_message}'",
                 RuntimeWarning,
             )
-        except:
+        except Exception as e:
+            logger.error(f"Error connecting to {WALLET.__class__.__name__}: {e}")
             pass
 
         if settings.lnbits_admin_ui and retry_counter == timeout:
-            logger.warning(
-                f"Fallback to VoidWallet, because the backend for {WALLET.__class__.__name__} isn't working properly"
-            )
-            set_wallet_class("VoidWallet")
+            set_void_wallet_class()
             WALLET = get_wallet_class()
             break
         else:
@@ -150,16 +160,25 @@ async def check_funding_source() -> None:
     signal.signal(signal.SIGINT, original_sigint_handler)
 
     logger.info(
-        f"✔️ Backend {WALLET.__class__.__name__} connected and with a balance of {balance} msat."
+        f"✔️ Backend {WALLET.__class__.__name__} connected "
+        f"and with a balance of {balance} msat."
     )
+
+
+def set_void_wallet_class():
+    logger.warning(
+        "Fallback to VoidWallet, because the backend for "
+        f"{settings.lnbits_backend_wallet_class} isn't working properly"
+    )
+    set_wallet_class("VoidWallet")
 
 
 async def check_installed_extensions(app: FastAPI):
     """
-    Check extensions that have been installed, but for some reason no longer present in the 'lnbits/extensions' directory.
-    One reason might be a docker-container that was re-created.
-    The 'data' directory (where the '.zip' files live) is expected to persist state.
-    Zips that are missing will be re-downloaded.
+    Check extensions that have been installed, but for some reason no longer present in
+    the 'lnbits/extensions' directory. One reason might be a docker-container that was
+    re-created. The 'data' directory (where the '.zip' files live) is expected to
+    persist state. Zips that are missing will be re-downloaded.
     """
     shutil.rmtree(os.path.join("lnbits", "upgrades"), True)
     await load_disabled_extension_list()
@@ -171,13 +190,18 @@ async def check_installed_extensions(app: FastAPI):
             if not installed:
                 await restore_installed_extension(app, ext)
                 logger.info(
-                    f"✔️ Successfully re-installed extension: {ext.id} ({ext.installed_version})"
+                    "✔️ Successfully re-installed extension: "
+                    f"{ext.id} ({ext.installed_version})"
                 )
         except Exception as e:
             logger.warning(e)
             logger.warning(
                 f"Failed to re-install extension: {ext.id} ({ext.installed_version})"
             )
+
+    logger.info(f"Installed Extensions ({len(installed_extensions)}):")
+    for ext in installed_extensions:
+        logger.info(f"{ext.id} ({ext.installed_version})")
 
 
 async def build_all_installed_extensions_list() -> List[InstallableExtension]:
@@ -208,9 +232,7 @@ def check_installed_extension_files(ext: InstallableExtension) -> bool:
     if ext.has_installed_version:
         return True
 
-    zip_files = glob.glob(
-        os.path.join(settings.lnbits_data_folder, "extensions", "*.zip")
-    )
+    zip_files = glob.glob(os.path.join(settings.lnbits_data_folder, "zips", "*.zip"))
 
     if f"./{str(ext.zip_path)}" not in zip_files:
         ext.download_archive()
@@ -237,22 +259,38 @@ async def restore_installed_extension(app: FastAPI, ext: InstallableExtension):
 
 def register_routes(app: FastAPI) -> None:
     """Register FastAPI routes / LNbits extensions."""
-    app.include_router(core_app)
-    app.include_router(core_html_routes)
+    init_core_routers(app)
 
     for ext in get_valid_extensions():
         try:
             register_ext_routes(app, ext)
         except Exception as e:
-            logger.error(str(e))
-            raise ImportError(
-                f"Please make sure that the extension `{ext.code}` follows conventions."
-            )
+            logger.error(f"Could not load extension `{ext.code}`: {str(e)}")
+
+
+def register_custom_extensions_path():
+    if settings.has_default_extension_path:
+        return
+    default_ext_path = os.path.join("lnbits", "extensions")
+    if os.path.isdir(default_ext_path) and len(os.listdir(default_ext_path)) != 0:
+        logger.warning(
+            "You are using a custom extensions path, "
+            + "but the default extensions directory is not empty. "
+            + f"Please clean-up the '{default_ext_path}' directory."
+        )
+        logger.warning(
+            f"You can move the existing '{default_ext_path}' directory to: "
+            + f" '{settings.lnbits_extensions_path}/extensions'"
+        )
+
+    sys.path.append(str(Path(settings.lnbits_extensions_path, "extensions")))
+    sys.path.append(str(Path(settings.lnbits_extensions_path, "upgrades")))
 
 
 def register_new_ext_routes(app: FastAPI) -> Callable:
     # Returns a function that registers new routes for an extension.
-    # The returned function encapsulates (creates a closure around) the `app` object but does expose it.
+    # The returned function encapsulates (creates a closure around)
+    # the `app` object but does expose it.
     def register_new_ext_routes_fn(ext: Extension):
         register_ext_routes(app, ext)
 
@@ -285,7 +323,10 @@ def register_ext_routes(app: FastAPI, ext: Extension) -> None:
     if hasattr(ext_module, f"{ext.code}_static_files"):
         ext_statics = getattr(ext_module, f"{ext.code}_static_files")
         for s in ext_statics:
-            app.mount(s["path"], s["app"], s["name"])
+            static_dir = Path(
+                settings.lnbits_extensions_path, "extensions", *s["path"].split("/")
+            )
+            app.mount(s["path"], StaticFiles(directory=static_dir), s["name"])
 
     if hasattr(ext_module, f"{ext.code}_redirect_paths"):
         ext_redirects = getattr(ext_module, f"{ext.code}_redirect_paths")
@@ -311,15 +352,19 @@ def register_startup(app: FastAPI):
 
             # setup admin settings
             await check_admin_settings()
+            await check_webpush_settings()
 
             log_server_info()
 
-            # adds security middleware
-            add_ratelimit_middleware(app)
-            add_ip_block_middleware(app)
-
             # initialize WALLET
-            set_wallet_class()
+            try:
+                set_wallet_class()
+            except Exception as e:
+                logger.error(
+                    f"Error initializing {settings.lnbits_backend_wallet_class}: "
+                    f"{str(e)}"
+                )
+                set_void_wallet_class()
 
             # initialize funding source
             await check_funding_source()
@@ -338,6 +383,9 @@ def register_startup(app: FastAPI):
 def register_shutdown(app: FastAPI):
     @app.on_event("shutdown")
     async def on_shutdown():
+        cancel_all_tasks()
+        # wait a bit to allow them to finish, so that cleanup can run without problems
+        await asyncio.sleep(0.1)
         WALLET = get_wallet_class()
         await WALLET.cleanup()
 
@@ -352,7 +400,7 @@ def initialize_server_logger():
             msg = await serverlog_queue.get()
             await websocketUpdater(super_user_hash, msg)
 
-    asyncio.create_task(update_websocket_serverlog())
+    create_permanent_task(update_websocket_serverlog)
 
     logger.add(
         lambda msg: serverlog_queue.put_nowait(msg),
@@ -370,7 +418,6 @@ def log_server_info():
     logger.info(f"Site title: {settings.lnbits_site_title}")
     logger.info(f"Funding source: {settings.lnbits_backend_wallet_class}")
     logger.info(f"Data folder: {settings.lnbits_data_folder}")
-    logger.info(f"Git version: {settings.lnbits_commit}")
     logger.info(f"Database: {get_db_vendor_name()}")
     logger.info(f"Service fee: {settings.lnbits_service_fee}")
 
@@ -380,9 +427,11 @@ def get_db_vendor_name():
     return (
         "PostgreSQL"
         if db_url and db_url.startswith("postgres://")
-        else "CockroachDB"
-        if db_url and db_url.startswith("cockroachdb://")
-        else "SQLite"
+        else (
+            "CockroachDB"
+            if db_url and db_url.startswith("cockroachdb://")
+            else "SQLite"
+        )
     )
 
 
@@ -393,20 +442,13 @@ def register_async_tasks(app):
 
     @app.on_event("startup")
     async def listeners():
-        loop = asyncio.get_event_loop()
-        loop.create_task(catch_everything_and_restart(check_pending_payments))
-        loop.create_task(catch_everything_and_restart(invoice_listener))
-        loop.create_task(catch_everything_and_restart(internal_invoice_listener))
-        await register_task_listeners()
-        # await register_watchdog()
-        await register_killswitch()
+        create_permanent_task(check_pending_payments)
+        create_permanent_task(invoice_listener)
+        create_permanent_task(internal_invoice_listener)
+        create_permanent_task(cache.invalidate_forever)
+        register_task_listeners()
+        register_killswitch()
         # await run_deferred_async() # calle: doesn't do anyting?
-
-    @app.on_event("shutdown")
-    async def stop_listeners():
-        # await unregister_watchdog()
-        await unregister_killswitch()
-        pass
 
 
 def register_exception_handlers(app: FastAPI):
@@ -483,25 +525,49 @@ def configure_logger() -> None:
     logger.remove()
     log_level: str = "DEBUG" if settings.debug else "INFO"
     formatter = Formatter()
-    logger.add(sys.stderr, level=log_level, format=formatter.format)
+    logger.add(sys.stdout, level=log_level, format=formatter.format)
+
+    if settings.enable_log_to_file:
+        logger.add(
+            Path(settings.lnbits_data_folder, "logs", "lnbits.log"),
+            rotation=settings.log_rotation,
+            retention=settings.log_retention,
+            level="INFO",
+            format=formatter.format,
+        )
+        logger.add(
+            Path(settings.lnbits_data_folder, "logs", "debug.log"),
+            rotation=settings.log_rotation,
+            retention=settings.log_retention,
+            level="DEBUG",
+            format=formatter.format,
+        )
+
     logging.getLogger("uvicorn").handlers = [InterceptHandler()]
     logging.getLogger("uvicorn.access").handlers = [InterceptHandler()]
+    logging.getLogger("uvicorn.error").handlers = [InterceptHandler()]
+    logging.getLogger("uvicorn.error").propagate = False
 
 
 class Formatter:
     def __init__(self):
         self.padding = 0
-        self.minimal_fmt: str = "<green>{time:YYYY-MM-DD HH:mm:ss.SS}</green> | <level>{level}</level> | <level>{message}</level>\n"
+        self.minimal_fmt = (
+            "<green>{time:YYYY-MM-DD HH:mm:ss.SS}</green> | <level>{level}</level> | "
+            "<level>{message}</level>\n"
+        )
         if settings.debug:
-            self.fmt: str = (
-                "<green>{time:YYYY-MM-DD HH:mm:ss.SS}</green> | <level>{level: <4}</level> | "
-                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level>\n"
+            self.fmt = (
+                "<green>{time:YYYY-MM-DD HH:mm:ss.SS}</green> | "
+                "<level>{level: <4}</level> | "
+                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+                "<level>{message}</level>\n"
             )
         else:
-            self.fmt: str = self.minimal_fmt
+            self.fmt = self.minimal_fmt
 
     def format(self, record):
-        function = "{function}".format(**record)  # pylint: disable=C0209
+        function = "{function}".format(**record)
         if function == "emit":  # uvicorn logs
             return self.minimal_fmt
         return self.fmt

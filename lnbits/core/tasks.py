@@ -1,43 +1,42 @@
 import asyncio
-from typing import Dict, Optional
+from typing import Dict
 
 import httpx
 from loguru import logger
 
+from lnbits.core.crud import (
+    get_balance_notify,
+    get_wallet,
+    get_webpush_subscriptions_for_user,
+)
+from lnbits.core.db import db
+from lnbits.core.models import Payment
+from lnbits.core.services import (
+    get_balance_delta,
+    send_payment_notification,
+    switch_to_voidwallet,
+)
 from lnbits.settings import get_wallet_class, settings
-from lnbits.tasks import SseListenersDict, register_invoice_listener
-
-from . import db
-from .crud import get_balance_notify, get_wallet
-from .models import Payment
-from .services import get_balance_delta, switch_to_voidwallet, websocketUpdater
+from lnbits.tasks import (
+    SseListenersDict,
+    create_permanent_task,
+    create_task,
+    register_invoice_listener,
+    send_push_notification,
+)
 
 api_invoice_listeners: Dict[str, asyncio.Queue] = SseListenersDict(
     "api_invoice_listeners"
 )
 
-killswitch: Optional[asyncio.Task] = None
-watchdog: Optional[asyncio.Task] = None
 
-
-async def register_killswitch():
+def register_killswitch():
     """
-    Registers a killswitch which will check lnbits-status repository
-    for a signal from LNbits and will switch to VoidWallet if the killswitch is triggered.
+    Registers a killswitch which will check lnbits-status repository for a signal from
+    LNbits and will switch to VoidWallet if the killswitch is triggered.
     """
     logger.debug("Starting killswitch task")
-    global killswitch
-    killswitch = asyncio.create_task(killswitch_task())
-
-
-async def unregister_killswitch():
-    """
-    Unregisters a killswitch taskl
-    """
-    global killswitch
-    if killswitch:
-        logger.debug("Stopping killswitch task")
-        killswitch.cancel()
+    create_permanent_task(killswitch_task)
 
 
 async def killswitch_task():
@@ -57,7 +56,8 @@ async def killswitch_task():
                             await switch_to_voidwallet()
                 except (httpx.ConnectError, httpx.RequestError):
                     logger.error(
-                        f"Cannot fetch lnbits status manifest. {settings.lnbits_status_manifest}"
+                        "Cannot fetch lnbits status manifest."
+                        f" {settings.lnbits_status_manifest}"
                     )
         await asyncio.sleep(settings.lnbits_killswitch_interval * 60)
 
@@ -67,20 +67,9 @@ async def register_watchdog():
     Registers a watchdog which will check lnbits balance and nodebalance
     and will switch to VoidWallet if the watchdog delta is reached.
     """
-    # TODO: implement watchdog porperly
+    # TODO: implement watchdog properly
     # logger.debug("Starting watchdog task")
-    # global watchdog
-    # watchdog = asyncio.create_task(watchdog_task())
-
-
-async def unregister_watchdog():
-    """
-    Unregisters a watchdog task
-    """
-    global watchdog
-    if watchdog:
-        logger.debug("Stopping watchdog task")
-        watchdog.cancel()
+    # create_permanent_task(watchdog_task)
 
 
 async def watchdog_task():
@@ -98,22 +87,23 @@ async def watchdog_task():
         await asyncio.sleep(settings.lnbits_watchdog_interval * 60)
 
 
-async def register_task_listeners():
+def register_task_listeners():
     """
-    Registers an invoice listener queue for the core tasks.
-    Incoming payaments in this queue will eventually trigger the signals sent to all other extensions
+    Registers an invoice listener queue for the core tasks. Incoming payments in this
+    queue will eventually trigger the signals sent to all other extensions
     and fulfill other core tasks such as dispatching webhooks.
     """
     invoice_paid_queue = asyncio.Queue(5)
     # we register invoice_paid_queue to receive all incoming invoices
     register_invoice_listener(invoice_paid_queue, "core/tasks.py")
     # register a worker that will react to invoices
-    asyncio.create_task(wait_for_paid_invoices(invoice_paid_queue))
+    create_task(wait_for_paid_invoices(invoice_paid_queue))
 
 
 async def wait_for_paid_invoices(invoice_paid_queue: asyncio.Queue):
     """
-    This worker dispatches events to all extensions, dispatches webhooks and balance notifys.
+    This worker dispatches events to all extensions,
+    dispatches webhooks and balance notifys.
     """
     while True:
         payment = await invoice_paid_queue.get()
@@ -122,13 +112,7 @@ async def wait_for_paid_invoices(invoice_paid_queue: asyncio.Queue):
         await dispatch_api_invoice_listeners(payment)
         wallet = await get_wallet(payment.wallet_id)
         if wallet:
-            await websocketUpdater(
-                payment.wallet_id,
-                {
-                    "wallet_balance": wallet.balance or None,
-                    "payment": payment.dict(),
-                },
-            )
+            await send_payment_notification(wallet, payment)
         # dispatch webhook
         if payment.webhook and not payment.webhook_status:
             await dispatch_webhook(payment)
@@ -142,6 +126,8 @@ async def wait_for_paid_invoices(invoice_paid_queue: asyncio.Queue):
                     await mark_webhook_sent(payment, r.status_code)
                 except (httpx.ConnectError, httpx.RequestError):
                     pass
+
+        await send_payment_push_notification(payment)
 
 
 async def dispatch_api_invoice_listeners(payment: Payment):
@@ -161,11 +147,15 @@ async def dispatch_webhook(payment: Payment):
     """
     Dispatches the webhook to the webhook url.
     """
+    logger.debug("sending webhook", payment.webhook)
+
+    if not payment.webhook:
+        return await mark_webhook_sent(payment, -1)
+
     async with httpx.AsyncClient() as client:
         data = payment.dict()
         try:
-            logger.debug("sending webhook", payment.webhook)
-            r = await client.post(payment.webhook, json=data, timeout=40)  # type: ignore
+            r = await client.post(payment.webhook, json=data, timeout=40)
             await mark_webhook_sent(payment, r.status_code)
         except (httpx.ConnectError, httpx.RequestError):
             await mark_webhook_sent(payment, -1)
@@ -179,3 +169,24 @@ async def mark_webhook_sent(payment: Payment, status: int) -> None:
         """,
         (status, payment.payment_hash),
     )
+
+
+async def send_payment_push_notification(payment: Payment):
+    wallet = await get_wallet(payment.wallet_id)
+
+    if wallet:
+        subscriptions = await get_webpush_subscriptions_for_user(wallet.user)
+
+        amount = int(payment.amount / 1000)
+
+        title = f"LNbits: {wallet.name}"
+        body = f"You just received {amount} sat{'s'[:amount^1]}!"
+
+        if payment.memo:
+            body += f"\r\n{payment.memo}"
+
+        for subscription in subscriptions:
+            url = (
+                f"https://{subscription.host}/wallet?usr={wallet.user}&wal={wallet.id}"
+            )
+            await send_push_notification(subscription, title, body, url)

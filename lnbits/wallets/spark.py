@@ -37,13 +37,17 @@ class SparkWallet(Wallet):
         )
 
     async def cleanup(self):
-        await self.client.aclose()
+        try:
+            await self.client.aclose()
+        except RuntimeError as e:
+            logger.warning(f"Error closing wallet connection: {e}")
 
     def __getattr__(self, key):
         async def call(*args, **kwargs):
             if args and kwargs:
                 raise TypeError(
-                    f"must supply either named arguments or a list of arguments, not both: {args} {kwargs}"
+                    "must supply either named arguments or a list of arguments, not"
+                    f" both: {args} {kwargs}"
                 )
             elif args:
                 params = args
@@ -70,7 +74,7 @@ class SparkWallet(Wallet):
 
             try:
                 data = r.json()
-            except:
+            except Exception:
                 raise UnknownError(r.text)
 
             if r.is_error:
@@ -158,7 +162,8 @@ class SparkWallet(Wallet):
 
             if len(pays) > 1:
                 raise SparkError(
-                    f"listpays({payment_hash}) returned an unexpected response: {listpays}"
+                    f"listpays({payment_hash}) returned an unexpected response:"
+                    f" {listpays}"
                 )
 
             if pay["status"] == "failed":

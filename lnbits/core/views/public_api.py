@@ -1,18 +1,18 @@
 import asyncio
-import datetime
 from http import HTTPStatus
 
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from lnbits import bolt11
 
-from .. import core_app
 from ..crud import get_standalone_payment
 from ..tasks import api_invoice_listeners
 
+public_router = APIRouter()
 
-@core_app.get("/public/v1/payment/{payment_hash}")
+
+@public_router.get("/public/v1/payment/{payment_hash}")
 async def api_public_payment_longpolling(payment_hash):
     payment = await get_standalone_payment(payment_hash)
 
@@ -25,10 +25,9 @@ async def api_public_payment_longpolling(payment_hash):
 
     try:
         invoice = bolt11.decode(payment.bolt11)
-        expiration = datetime.datetime.fromtimestamp(invoice.date + invoice.expiry)
-        if expiration < datetime.datetime.now():
+        if invoice.has_expired():
             return {"status": "expired"}
-    except:
+    except Exception:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail="Invalid bolt11 invoice."
         )

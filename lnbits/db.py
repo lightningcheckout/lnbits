@@ -47,25 +47,22 @@ if settings.lnbits_database_url:
             lambda value, curs: float(value) if value is not None else None,
         )
     )
-    register_type(
-        new_type(
-            (1082, 1083, 1266),
-            "DATE2INT",
-            lambda value, curs: time.mktime(value.timetuple())
-            if value is not None
-            else None,
-        )
-    )
 
     register_type(new_type((1184, 1114), "TIMESTAMP2INT", _parse_timestamp))
 else:
-    if os.path.isdir(settings.lnbits_data_folder):
-        DB_TYPE = SQLITE
+    if not os.path.isdir(settings.lnbits_data_folder):
+        os.mkdir(settings.lnbits_data_folder)
+        logger.info(f"Created {settings.lnbits_data_folder}")
+    DB_TYPE = SQLITE
+
+
+def compat_timestamp_placeholder():
+    if DB_TYPE == POSTGRES:
+        return "to_timestamp(?)"
+    elif DB_TYPE == COCKROACH:
+        return "cast(? AS timestamp)"
     else:
-        raise NotADirectoryError(
-            f"LNBITS_DATA_FOLDER named {settings.lnbits_data_folder} was not created"
-            f" - please 'mkdir {settings.lnbits_data_folder}' and try again"
-        )
+        return "?"
 
 
 class Compat:
@@ -116,15 +113,9 @@ class Compat:
             return "BIGINT"
         return "INT"
 
-    @classmethod
     @property
-    def timestamp_placeholder(cls):
-        if DB_TYPE == POSTGRES:
-            return "to_timestamp(?)"
-        elif DB_TYPE == COCKROACH:
-            return "cast(? AS timestamp)"
-        else:
-            return "?"
+    def timestamp_placeholder(self) -> str:
+        return compat_timestamp_placeholder()
 
 
 class Connection(Compat):
@@ -304,10 +295,10 @@ class Database(Compat):
         yield conn
 
     @classmethod
-    async def clean_ext_db_files(self, ext_id: str) -> bool:
+    async def clean_ext_db_files(cls, ext_id: str) -> bool:
         """
-        If the extension DB is stored directly on the filesystem (like SQLite) then delete the files and return True.
-        Otherwise do nothing and return False.
+        If the extension DB is stored directly on the filesystem (like SQLite) then
+        delete the files and return True. Otherwise do nothing and return False.
         """
 
         if DB_TYPE == SQLITE:
@@ -375,7 +366,6 @@ class Page(BaseModel, Generic[T]):
 
 class Filter(BaseModel, Generic[TFilterModel]):
     field: str
-    nested: Optional[List[str]]
     op: Operator = Operator.EQ
     values: list[Any]
 
@@ -390,55 +380,36 @@ class Filter(BaseModel, Generic[TFilterModel]):
             split = key[:-1].split("[")
             if len(split) != 2:
                 raise ValueError("Invalid key")
-            field_names = split[0].split(".")
+            field = split[0]
             op = Operator(split[1])
         else:
-            field_names = key.split(".")
+            field = key
             op = Operator("eq")
-
-        field = field_names[0]
-        nested = field_names[1:]
 
         if field in model.__fields__:
             compare_field = model.__fields__[field]
             values = []
             for raw_value in raw_values:
-                # If there is a nested field, pydantic expects a dict, so the raw value is turned into a dict before
-                # and the converted value is extracted afterwards
-                for name in reversed(nested):
-                    raw_value = {name: raw_value}
-
                 validated, errors = compare_field.validate(raw_value, {}, loc="none")
                 if errors:
                     raise ValidationError(errors=[errors], model=model)
-
-                for name in nested:
-                    if isinstance(validated, dict):
-                        validated = validated[name]
-                    else:
-                        validated = getattr(validated, name)
-
                 values.append(validated)
         else:
             raise ValueError("Unknown filter field")
 
-        return cls(field=field, op=op, nested=nested, values=values, model=model)
+        return cls(field=field, op=op, values=values, model=model)
 
     @property
     def statement(self):
-        accessor = self.field
-        if self.nested:
-            for name in self.nested:
-                accessor = f"({accessor} ->> '{name}')"
         if self.model and self.model.__fields__[self.field].type_ == datetime.datetime:
-            placeholder = Compat.timestamp_placeholder
+            placeholder = compat_timestamp_placeholder()
         else:
             placeholder = "?"
         if self.op in (Operator.INCLUDE, Operator.EXCLUDE):
             placeholders = ", ".join([placeholder] * len(self.values))
-            stmt = [f"{accessor} {self.op.as_sql} ({placeholders})"]
+            stmt = [f"{self.field} {self.op.as_sql} ({placeholders})"]
         else:
-            stmt = [f"{accessor} {self.op.as_sql} {placeholder}"] * len(self.values)
+            stmt = [f"{self.field} {self.op.as_sql} {placeholder}"] * len(self.values)
         return " OR ".join(stmt)
 
 
@@ -447,8 +418,8 @@ class Filters(BaseModel, Generic[TFilterModel]):
     Generic helper class for filtering and sorting data.
     For usage in an api endpoint, use the `parse_filters` dependency.
 
-    When constructing this class manually always make sure to pass a model so that the values can be validated.
-    Otherwise, make sure to validate the inputs manually.
+    When constructing this class manually always make sure to pass a model so that
+    the values can be validated. Otherwise, make sure to validate the inputs manually.
     """
 
     filters: List[Filter[TFilterModel]] = []
@@ -491,7 +462,7 @@ class Filters(BaseModel, Generic[TFilterModel]):
         if self.search and self.model:
             if DB_TYPE == POSTGRES:
                 where_stmts.append(
-                    f"lower(concat({f', '.join(self.model.__search_fields__)})) LIKE ?"
+                    f"lower(concat({', '.join(self.model.__search_fields__)})) LIKE ?"
                 )
             elif DB_TYPE == SQLITE:
                 where_stmts.append(

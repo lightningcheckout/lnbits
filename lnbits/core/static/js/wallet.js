@@ -3,45 +3,24 @@
 Vue.component(VueQrcode.name, VueQrcode)
 Vue.use(VueQrcodeReader)
 
-function generateChart(canvas, payments) {
-  var txs = []
-  var n = 0
-  var data = {
-    labels: [],
-    income: [],
-    outcome: [],
-    cumulative: []
-  }
-
-  _.each(
-    payments.filter(p => !p.pending).sort((a, b) => a.time - b.time),
-    tx => {
-      txs.push({
-        hour: Quasar.utils.date.formatDate(tx.date, 'YYYY-MM-DDTHH:00'),
-        sat: tx.sat
-      })
+function generateChart(canvas, rawData) {
+  const data = rawData.reduce(
+    (previous, current) => {
+      previous.labels.push(current.date)
+      previous.income.push(current.income)
+      previous.spending.push(current.spending)
+      previous.cumulative.push(current.balance)
+      return previous
+    },
+    {
+      labels: [],
+      income: [],
+      spending: [],
+      cumulative: []
     }
   )
 
-  _.each(_.groupBy(txs, 'hour'), (value, day) => {
-    var income = _.reduce(
-      value,
-      (memo, tx) => (tx.sat >= 0 ? memo + tx.sat : memo),
-      0
-    )
-    var outcome = _.reduce(
-      value,
-      (memo, tx) => (tx.sat < 0 ? memo + Math.abs(tx.sat) : memo),
-      0
-    )
-    n = n + income - outcome
-    data.labels.push(day)
-    data.income.push(income)
-    data.outcome.push(outcome)
-    data.cumulative.push(n)
-  })
-
-  new Chart(canvas.getContext('2d'), {
+  return new Chart(canvas.getContext('2d'), {
     type: 'bar',
     data: {
       labels: data.labels,
@@ -64,7 +43,7 @@ function generateChart(canvas, payments) {
           backgroundColor: window.Color('rgb(76,175,80)').alpha(0.5).rgbString() // green
         },
         {
-          data: data.outcome,
+          data: data.spending,
           type: 'bar',
           label: 'out',
           barPercentage: 0.75,
@@ -85,7 +64,7 @@ function generateChart(canvas, payments) {
           {
             type: 'time',
             display: true,
-            offset: true,
+            //offset: true,
             time: {
               minUnit: 'hour',
               stepSize: 3
@@ -137,6 +116,9 @@ new Vue({
           comment: ''
         },
         paymentChecker: null,
+        copy: {
+          show: false
+        },
         camera: {
           show: false,
           camera: 'auto'
@@ -172,6 +154,12 @@ new Vue({
       },
       paymentsCSV: {
         columns: [
+          {
+            name: 'pending',
+            align: 'left',
+            label: 'Pending',
+            field: 'pending'
+          },
           {
             name: 'memo',
             align: 'left',
@@ -221,13 +209,32 @@ new Vue({
             align: 'right',
             label: this.$t('webhook'),
             field: 'webhook'
+          },
+          {
+            name: 'fiat_currency',
+            align: 'right',
+            label: 'Fiat Currency',
+            field: row => row.extra.wallet_fiat_currency
+          },
+          {
+            name: 'fiat_amount',
+            align: 'right',
+            label: 'Fiat Amount',
+            field: row => row.extra.wallet_fiat_amount
           }
         ],
         filter: null,
         loading: false
       },
       paymentsChart: {
-        show: false
+        show: false,
+        group: {value: 'hour', label: 'Hour'},
+        groupOptions: [
+          {value: 'month', label: 'Month'},
+          {value: 'day', label: 'Day'},
+          {value: 'hour', label: 'Hour'}
+        ],
+        instance: null
       },
       disclaimerDialog: {
         show: false,
@@ -235,7 +242,10 @@ new Vue({
       },
       balance: 0,
       credit: 0,
-      newName: ''
+      update: {
+        name: null,
+        currency: null
+      }
     }
   },
   computed: {
@@ -277,9 +287,27 @@ new Vue({
     },
     showChart: function () {
       this.paymentsChart.show = true
-      this.$nextTick(() => {
-        generateChart(this.$refs.canvas, this.payments)
-      })
+      LNbits.api
+        .request(
+          'GET',
+          '/api/v1/payments/history?group=' + this.paymentsChart.group.value,
+          this.g.wallet.adminkey
+        )
+        .then(response => {
+          this.$nextTick(() => {
+            if (this.paymentsChart.instance) {
+              this.paymentsChart.instance.destroy()
+            }
+            this.paymentsChart.instance = generateChart(
+              this.$refs.canvas,
+              response.data
+            )
+          })
+        })
+        .catch(err => {
+          LNbits.utils.notifyApiError(err)
+          this.paymentsChart.show = false
+        })
     },
     focusInput(el) {
       this.$nextTick(() => this.$refs[el].focus())
@@ -292,7 +320,6 @@ new Vue({
       this.receive.data.amount = null
       this.receive.data.memo = null
       this.receive.unit = 'sat'
-      this.receive.paymentChecker = null
       this.receive.minMax = [0, 2100000000000000]
       this.receive.lnurl = null
       this.focusInput('setAmount')
@@ -302,10 +329,13 @@ new Vue({
       this.parse.invoice = null
       this.parse.lnurlpay = null
       this.parse.lnurlauth = null
+      this.parse.copy.show =
+        window.isSecureContext && navigator.clipboard?.readText !== undefined
       this.parse.data.request = ''
       this.parse.data.comment = ''
       this.parse.data.paymentChecker = null
       this.parse.camera.show = false
+      this.focusInput('textArea')
     },
     updateBalance: function (credit) {
       LNbits.api
@@ -334,11 +364,6 @@ new Vue({
           LNbits.utils.notifyApiError(error)
         })
     },
-    closeReceiveDialog: function () {
-      setTimeout(() => {
-        clearInterval(this.receive.paymentChecker)
-      }, 10000)
-    },
     closeParseDialog: function () {
       setTimeout(() => {
         clearInterval(this.parse.paymentChecker)
@@ -351,7 +376,6 @@ new Vue({
       if (this.receive.paymentHash === paymentHash) {
         this.receive.show = false
         this.receive.paymentHash = null
-        clearInterval(this.receive.paymentChecker)
       }
     },
     createInvoice: function () {
@@ -396,19 +420,7 @@ new Vue({
             }
           }
 
-          clearInterval(this.receive.paymentChecker)
-          setTimeout(() => {
-            clearInterval(this.receive.paymentChecker)
-          }, 40000)
-          this.receive.paymentChecker = setInterval(() => {
-            let hash = response.data.payment_hash
-
-            LNbits.api.getPayment(this.g.wallet, hash).then(response => {
-              if (response.data.paid) {
-                this.onPaymentReceived(hash)
-              }
-            })
-          }, 5000)
+          this.fetchPayments()
         })
         .catch(err => {
           LNbits.utils.notifyApiError(err)
@@ -690,7 +702,7 @@ new Vue({
 
       LNbits.api
         .authLnurl(this.g.wallet, this.parse.lnurlauth.callback)
-        .then(response => {
+        .then(_ => {
           dismissAuthMsg()
           this.$q.notify({
             message: `Authentication successful.`,
@@ -713,35 +725,38 @@ new Vue({
           }
         })
     },
-    updateWalletName: function () {
-      let newName = this.newName
-      let adminkey = this.g.wallet.adminkey
-      if (!newName || !newName.length) return
+    updateWallet: function (data) {
       LNbits.api
-        .request('PUT', '/api/v1/wallet/' + newName, adminkey, {})
-        .then(res => {
-          this.newName = ''
+        .request('PATCH', '/api/v1/wallet', this.g.wallet.adminkey, data)
+        .then(_ => {
           this.$q.notify({
-            message: `Wallet named updated.`,
+            message: `Wallet updated.`,
             type: 'positive',
             timeout: 3500
           })
-          LNbits.href.updateWallet(
-            res.data.name,
-            this.user.id,
-            this.g.wallet.id
-          )
+          window.location.reload()
         })
         .catch(err => {
-          this.newName = ''
           LNbits.utils.notifyApiError(err)
         })
     },
-    deleteWallet: function (walletId, user) {
+    deleteWallet: function () {
       LNbits.utils
         .confirmDialog('Are you sure you want to delete this wallet?')
         .onOk(() => {
-          LNbits.href.deleteWallet(walletId, user)
+          LNbits.api
+            .deleteWallet(this.g.wallet)
+            .then(_ => {
+              this.$q.notify({
+                timeout: 3000,
+                message: `Wallet deleted!`,
+                spinner: true
+              })
+            })
+            .catch(err => {
+              this.paymentsTable.loading = false
+              LNbits.utils.notifyApiError(err)
+            })
         })
     },
     fetchPayments: function (props) {
@@ -787,24 +802,36 @@ new Vue({
       // status is important for export but it is not in paymentsTable
       // because it is manually added with payment detail link and icons
       // and would cause duplication in the list
-      let columns = structuredClone(this.paymentsCSV.columns)
-      columns.unshift({
-        name: 'pending',
-        align: 'left',
-        label: 'Pending',
-        field: 'pending'
+      LNbits.api.getPayments(this.g.wallet, {}).then(response => {
+        const payments = response.data.data.map(LNbits.map.payment)
+        LNbits.utils.exportCSV(
+          this.paymentsCSV.columns,
+          payments,
+          this.g.wallet.name + '-payments'
+        )
       })
-      LNbits.utils.exportCSV(columns, this.payments)
+    },
+    pasteToTextArea: function () {
+      this.$refs.textArea.focus() // Set cursor to textarea
+      navigator.clipboard.readText().then(text => {
+        this.$refs.textArea.value = text
+      })
     }
   },
   watch: {
     payments: function () {
       this.fetchBalance()
+    },
+    'paymentsChart.group': function () {
+      this.showChart()
     }
   },
   created: function () {
     this.fetchBalance()
     this.fetchPayments()
+
+    this.update.name = this.g.wallet.name
+    this.update.currency = this.g.wallet.currency
 
     LNbits.api
       .request('GET', '/api/v1/currencies')

@@ -1,13 +1,10 @@
-import uvloop
-
-uvloop.install()
-
 import multiprocessing as mp
 import time
 from pathlib import Path
 
 import click
 import uvicorn
+from uvicorn.supervisors import ChangeReload
 
 from lnbits.settings import set_cli_settings, settings
 
@@ -40,10 +37,17 @@ def main(
 
     # create data dir if it does not exist
     Path(settings.lnbits_data_folder).mkdir(parents=True, exist_ok=True)
+    Path(settings.lnbits_data_folder, "logs").mkdir(parents=True, exist_ok=True)
+
+    # create `extensions`` dir if it does not exist
+    Path(settings.lnbits_extensions_path, "extensions").mkdir(
+        parents=True, exist_ok=True
+    )
 
     set_cli_settings(host=host, port=port, forwarded_allow_ips=forwarded_allow_ips)
 
-    # this beautiful beast parses all command line arguments and passes them to the uvicorn server
+    # this beautiful beast parses all command line arguments and
+    # passes them to the uvicorn server
     d = dict()
     for a in ctx.args:
         item = a.split("=")
@@ -70,7 +74,14 @@ def main(
         )
 
         server = uvicorn.Server(config=config)
-        process = mp.Process(target=server.run)
+
+        if config.should_reload:
+            sock = config.bind_socket()
+            run = ChangeReload(config, target=server.run, sockets=[sock]).run
+        else:
+            run = server.run
+
+        process = mp.Process(target=run)
         process.start()
         server_restart.wait()
         server_restart.clear()

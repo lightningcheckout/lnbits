@@ -1,11 +1,11 @@
-# LNbits
+# LNbits BETA
 
 [![license-badge]](LICENSE)
 [![docs-badge]][docs]
 
 ![Lightning network wallet](https://i.imgur.com/EHvK6Lq.png)
 
-# LNbits v0.10 BETA, free and open-source Lightning wallet accounts system
+# Free and Open-Source Lightning Wallet Accounts System
 
 (Join us on [https://t.me/lnbits](https://t.me/lnbits))
 
@@ -31,7 +31,7 @@ LNbits is inspired by all the great work of [opennode.com](https://www.opennode.
 
 ## Running LNbits
 
-See the [install guide](https://github.com/lnbits/lnbits/wiki/LNbits-Documentation#install-options) for details on installation and setup.
+See the [install guide](https://github.com/lnbits/lnbits/blob/main/docs/guide/installation.md) for details on installation and setup.
 
 ## LNbits as an account system
 
@@ -52,7 +52,7 @@ LNURL has a fallback scheme, so if scanned by a regular QR code reader it can de
 ![lnurl fallback](https://i.imgur.com/CPBKHIv.png)
 
 Using **lnbits.com/?lightning="LNURL-withdraw"** will trigger a withdraw that builds an LNbits wallet.
-Example use would be an ATM, which utilises LNURL, if the user scans the QR with a regular QR code scanner app, they will still be able to access the funds.
+Example use would be an ATM, which utilizes LNURL, if the user scans the QR with a regular QR code scanner app, they will still be able to access the funds.
 
 ![lnurl ATM](https://i.imgur.com/Gi6bn3L.jpg)
 

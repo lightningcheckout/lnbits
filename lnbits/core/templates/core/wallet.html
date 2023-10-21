@@ -211,10 +211,17 @@
                     parseFloat(String(props.row.fsat).replaceAll(",", "")) / 100
                     }}
                   </q-td>
-
                   <q-td auto-width key="amount" v-else :props="props">
                     {{ props.row.fsat }}<br />
-                    <i>fee {{ props.row.fee/1000 }}</i>
+                    <i v-if="props.row.extra.wallet_fiat_currency">
+                      {{ props.row.extra.wallet_fiat_currency }} {{
+                      props.row.extra.wallet_fiat_amount }}
+                      <br />
+                    </i>
+                    <i v-if="props.row.extra.fiat_currency">
+                      {{ props.row.extra.fiat_currency }} {{
+                      props.row.extra.fiat_amount }}
+                    </i>
                   </q-td>
                 </q-tr>
 
@@ -233,11 +240,9 @@
                         >
                           <a :href="'lightning:' + props.row.bolt11">
                             <q-responsive :ratio="1" class="q-mx-xl">
-                              <qrcode
+                              <lnbits-qrcode
                                 :value="'lightning:' + props.row.bolt11.toUpperCase()"
-                                :options="{width: 340}"
-                                class="rounded-borders"
-                              ></qrcode>
+                              ></lnbits-qrcode>
                             </q-responsive>
                           </a>
                         </div>
@@ -323,12 +328,11 @@
                   <q-card>
                     <q-card-section class="text-center">
                       <a href="lightning:{{wallet.lnurlwithdraw_full}}">
-                        <qrcode
-                          value="lightning:{{wallet.lnurlwithdraw_full}}"
-                          :options="{width:240}"
-                        ></qrcode>
+                        <lnbits-qrcode
+                          :value="lightning:{{wallet.lnurlwithdraw_full}}"
+                        ></lnbits-qrcode>
                       </a>
-                      <p v-text="$('drain_funds_desc')"></p>
+                      <p v-text="$t('drain_funds_desc')"></p>
                     </q-card-section>
                   </q-card>
                 </q-expansion-item>
@@ -345,7 +349,6 @@
                       <p v-text="$t('export_to_phone_desc')"></p>
                       <qrcode
                         :value="'{{request.base_url}}' +'wallet?usr={{user.id}}&wal={{wallet.id}}'"
-                        :options="{width:240}"
                       ></qrcode>
                     </q-card-section>
                   </q-card>
@@ -361,23 +364,54 @@
                       <div class="" style="max-width: 320px">
                         <q-input
                           filled
-                          v-model.trim="newName"
-                          label="Label"
-                          dense="dense"
+                          v-model.trim="update.name"
+                          label="Name"
+                          dense
                           @update:model-value="(e) => console.log(e)"
                         />
                       </div>
                       <q-btn
-                        :disable="!newName.length"
+                        :disable="!update.name.length"
                         unelevated
                         class="q-mt-sm"
                         color="primary"
                         :label="$t('update_name')"
-                        @click="updateWalletName()"
+                        @click="updateWallet({ name: update.name })"
                       ></q-btn>
                     </q-card-section>
                   </q-card>
                 </q-expansion-item>
+                <q-separator></q-separator>
+                <q-expansion-item
+                  group="extras"
+                  icon="attach_money"
+                  :label="$t('fiat_tracking')"
+                >
+                  <q-card>
+                    <q-card-section>
+                      <div style="max-width: 360px">
+                        <q-select
+                          filled
+                          dense
+                          clearable
+                          v-model="update.currency"
+                          type="text"
+                          :label="$t('currency')"
+                          :options="receive.units.filter((u) => u !== 'sat')"
+                        ></q-select>
+                      </div>
+                      <q-btn
+                        :disable="!update.name.length"
+                        unelevated
+                        class="q-mt-sm"
+                        color="primary"
+                        :label="$t('update_currency')"
+                        @click="updateWallet({ currency: update.currency || '' })"
+                      ></q-btn>
+                    </q-card-section>
+                  </q-card>
+                </q-expansion-item>
+
                 <q-separator></q-separator>
                 <q-expansion-item
                   group="extras"
@@ -390,7 +424,7 @@
                       <q-btn
                         unelevated
                         color="red-10"
-                        @click="deleteWallet('{{ wallet.id }}', '{{ user.id }}')"
+                        @click="deleteWallet()"
                         :label="$t('delete_wallet')"
                       ></q-btn>
                     </q-card-section>
@@ -428,7 +462,7 @@
         </div>
       </div>
 
-      <q-dialog v-model="receive.show" @hide="closeReceiveDialog">
+      <q-dialog v-model="receive.show">
         {% raw %}
         <q-card
           v-if="!receive.paymentReq"
@@ -443,7 +477,7 @@
               filled
               dense
               v-model.number="receive.data.amount"
-              :label="$('amount')+' ({{LNBITS_DENOMINATION}}) *'"
+              :label="$t('amount')+' ({{LNBITS_DENOMINATION}}) *'"
               mask="#.##"
               fill-mask="0"
               reverse-fill-mask
@@ -514,11 +548,9 @@
           <div class="text-center q-mb-lg">
             <a :href="'lightning:' + receive.paymentReq">
               <q-responsive :ratio="1" class="q-mx-xl">
-                <qrcode
+                <lnbits-qrcode
                   :value="'lightning:' + receive.paymentReq.toUpperCase()"
-                  :options="{width: 340}"
-                  class="rounded-borders"
-                ></qrcode>
+                ></lnbits-qrcode>
               </q-responsive>
             </a>
           </div>
@@ -711,6 +743,7 @@
                 v-model.trim="parse.data.request"
                 type="textarea"
                 :label="$t('paste_invoice_label')"
+                ref="textArea"
               >
               </q-input>
               <div class="row q-mt-lg">
@@ -721,6 +754,17 @@
                   type="submit"
                   :label="$t('read')"
                 ></q-btn>
+                <q-icon
+                  name="content_paste"
+                  color="grey"
+                  class="q-mt-xs q-ml-sm q-mr-auto"
+                  v-if="parse.copy.show"
+                  @click="pasteToTextArea"
+                  ><q-tooltip
+                    >{% raw %}{{$t('paste_from_clipboard')}}{% endraw
+                    %}</q-tooltip
+                  ></q-icon
+                >
                 <q-btn
                   v-close-popup
                   flat
@@ -777,6 +821,19 @@
       <q-dialog v-model="paymentsChart.show">
         <q-card class="q-pa-sm" style="width: 800px; max-width: unset">
           <q-card-section>
+            <div class="row q-gutter-sm justify-between">
+              <div class="text-h6">Payments Chart</div>
+              <q-select
+                label="Group"
+                filled
+                dense
+                v-model="paymentsChart.group"
+                style="min-width: 120px"
+                :options="paymentsChart.groupOptions"
+              >
+              </q-select>
+            </div>
+
             <canvas ref="canvas" width="600" height="400"></canvas>
           </q-card-section>
         </q-card>

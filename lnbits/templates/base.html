@@ -42,10 +42,9 @@
               <img height="30px" alt="Logo" src="{{ USE_CUSTOM_LOGO }}" />
               {%else%} {% if SITE_TITLE != 'LNbits' %} {{ SITE_TITLE }} {% else
               %}
-              <span><strong>LN</strong>bits</span> {% endif %} {%endif%} {%
-              endblock %}
-            </q-btn>
-            {% block toolbar_subtitle %}{%if user and user.super_user%}
+              <span><strong>LN</strong>bits</span> {% endif %} {%endif%} </q-btn
+            >{% endblock %} {% block toolbar_subtitle %}{%if user and
+            user.super_user%}
             <q-badge align="middle">Super User</q-badge>
             {% elif user and user.admin %}
             <q-badge align="middle">Admin User</q-badge>
@@ -59,6 +58,10 @@
           >
             <span>OFFLINE</span>
           </q-badge>
+          <lnbits-notifications-btn
+            v-if="g.user"
+            pubkey="{{ WEBPUSH_PUBKEY }}"
+          ></lnbits-notifications-btn>
           <q-btn-dropdown
             v-if="g.allowedThemes && g.allowedThemes.length > 1"
             dense
@@ -184,6 +187,7 @@
 
         <lnbits-admin-ui
           v-if="'{{LNBITS_ADMIN_UI}}' == 'True'"
+          :show-node="'{{LNBITS_NODE_UI}}' == 'True'"
         ></lnbits-admin-ui>
         <lnbits-extension-list class="q-pb-xl"></lnbits-extension-list>
       </q-drawer>
@@ -211,9 +215,11 @@
     {% endfor %}
     <!---->
     <script type="text/javascript">
+      const SITE_DESCRIPTION = {{ SITE_DESCRIPTION | tojson}}
       const themes = {{ LNBITS_THEME_OPTIONS | tojson }}
       const LNBITS_DENOMINATION = {{ LNBITS_DENOMINATION | tojson }}
       const LNBITS_VERSION = {{ LNBITS_VERSION | tojson }}
+      const LNBITS_QR_LOGO = {{ LNBITS_QR_LOGO | tojson }}
       if (themes && themes.length) {
         window.allowedThemes = themes.map(str => str.trim())
       }

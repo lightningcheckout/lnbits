@@ -1,26 +1,16 @@
-imports_ok = True
-try:
-    import grpc
-    from grpc import RpcError
-except ImportError:  # pragma: nocover
-    imports_ok = False
-
 import asyncio
 import base64
 import hashlib
 from os import environ
 from typing import AsyncGenerator, Dict, Optional
 
+import grpc
 from loguru import logger
 
-from .macaroon import AESCipher, load_macaroon
-
-if imports_ok:
-    import lnbits.wallets.lnd_grpc_files.lightning_pb2 as ln
-    import lnbits.wallets.lnd_grpc_files.lightning_pb2_grpc as lnrpc
-    import lnbits.wallets.lnd_grpc_files.router_pb2 as router
-    import lnbits.wallets.lnd_grpc_files.router_pb2_grpc as routerrpc
-
+import lnbits.wallets.lnd_grpc_files.lightning_pb2 as ln
+import lnbits.wallets.lnd_grpc_files.lightning_pb2_grpc as lnrpc
+import lnbits.wallets.lnd_grpc_files.router_pb2 as router
+import lnbits.wallets.lnd_grpc_files.router_pb2_grpc as routerrpc
 from lnbits.settings import settings
 
 from .base import (
@@ -30,39 +20,7 @@ from .base import (
     StatusResponse,
     Wallet,
 )
-
-
-def get_ssl_context(cert_path: str):
-    import ssl
-
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-    context.options |= ssl.OP_NO_SSLv2
-    context.options |= ssl.OP_NO_SSLv3
-    context.options |= ssl.OP_NO_TLSv1
-    context.options |= ssl.OP_NO_TLSv1_1
-    context.options |= ssl.OP_NO_COMPRESSION
-    context.set_ciphers(
-        ":".join(
-            [
-                "ECDHE+AESGCM",
-                "ECDHE+CHACHA20",
-                "DHE+AESGCM",
-                "DHE+CHACHA20",
-                "ECDH+AESGCM",
-                "DH+AESGCM",
-                "ECDH+AES",
-                "DH+AES",
-                "RSA+AESGCM",
-                "RSA+AES",
-                "!aNULL",
-                "!eNULL",
-                "!MD5",
-                "!DSS",
-            ]
-        )
-    )
-    context.load_verify_locations(capath=cert_path)
-    return context
+from .macaroon import AESCipher, load_macaroon
 
 
 def b64_to_bytes(checking_id: str) -> bytes:
@@ -83,7 +41,7 @@ def hex_to_b64(hex_str: str) -> str:
 def hex_to_bytes(hex_str: str) -> bytes:
     try:
         return bytes.fromhex(hex_str)
-    except:
+    except Exception:
         return b""
 
 
@@ -99,11 +57,6 @@ environ["GRPC_SSL_CIPHER_SUITES"] = "HIGH+ECDSA"
 
 class LndWallet(Wallet):
     def __init__(self):
-        if not imports_ok:  # pragma: nocover
-            raise ImportError(
-                "The `grpcio` and `protobuf` library must be installed to use `GRPC LndWallet`. Alternatively try using the LndRESTWallet."
-            )
-
         endpoint = settings.lnd_grpc_endpoint
 
         macaroon = (
@@ -242,7 +195,7 @@ class LndWallet(Wallet):
             return PaymentStatus(None)
         try:
             resp = await self.rpc.LookupInvoice(ln.PaymentHash(r_hash=r_hash))
-        except RpcError:
+        except grpc.RpcError:
             return PaymentStatus(None)
         if resp.settled:
             return PaymentStatus(True)
@@ -289,7 +242,7 @@ class LndWallet(Wallet):
                         bytes_to_hex(payment.htlcs[-1].preimage),
                     )
                 return PaymentStatus(statuses[payment.status])
-        except:  # most likely the payment wasn't found
+        except Exception:  # most likely the payment wasn't found
             return PaymentStatus(None)
 
         return PaymentStatus(None)
@@ -306,6 +259,7 @@ class LndWallet(Wallet):
                     yield checking_id
             except Exception as exc:
                 logger.error(
-                    f"lost connection to lnd invoices stream: '{exc}', retrying in 5 seconds"
+                    f"lost connection to lnd invoices stream: '{exc}', "
+                    "retrying in 5 seconds"
                 )
                 await asyncio.sleep(5)

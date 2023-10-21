@@ -6,11 +6,11 @@ from uuid import UUID
 import httpx
 from loguru import logger
 
+from lnbits.core.db import db as core_db
 from lnbits.db import Connection
 from lnbits.extension_manager import Extension
 from lnbits.settings import settings
 
-from . import db as core_db
 from .crud import update_migration_version
 
 
@@ -25,12 +25,13 @@ async def migrate_extension_database(ext: Extension, current_version):
         )
 
     async with ext_db.connect() as ext_conn:
-        await run_migration(ext_conn, ext_migrations, current_version)
+        await run_migration(ext_conn, ext_migrations, ext.code, current_version)
 
 
-async def run_migration(db: Connection, migrations_module: Any, current_version: int):
+async def run_migration(
+    db: Connection, migrations_module: Any, db_name: str, current_version: int
+):
     matcher = re.compile(r"^m(\d\d\d)_")
-    db_name = migrations_module.__name__.split(".")[-2]
     for key, migrate in migrations_module.__dict__.items():
         match = matcher.match(key)
         if match:
@@ -51,7 +52,8 @@ async def stop_extension_background_work(ext_id: str, user: str):
     """
     Stop background work for extension (like asyncio.Tasks, WebSockets, etc).
     Extensions SHOULD expose a DELETE enpoint at the root level of their API.
-    This function tries first to call the endpoint using `http` and if if fails it tries using `https`.
+    This function tries first to call the endpoint using `http`
+    and if it fails it tries using `https`.
     """
     async with httpx.AsyncClient() as client:
         try:
@@ -71,7 +73,7 @@ def to_valid_user_id(user_id: str) -> UUID:
         raise ValueError("User ID must have at least 128 bits")
     try:
         int(user_id, 16)
-    except:
+    except Exception:
         raise ValueError("Invalid hex string for User ID.")
 
     return UUID(hex=user_id[:32], version=4)

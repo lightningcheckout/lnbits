@@ -33,13 +33,16 @@ class LnTipsWallet(Wallet):
         self.client = httpx.AsyncClient(base_url=self.endpoint, headers=self.auth)
 
     async def cleanup(self):
-        await self.client.aclose()
+        try:
+            await self.client.aclose()
+        except RuntimeError as e:
+            logger.warning(f"Error closing wallet connection: {e}")
 
     async def status(self) -> StatusResponse:
         r = await self.client.get("/api/v1/balance", timeout=40)
         try:
             data = r.json()
-        except:
+        except Exception:
             return StatusResponse(
                 f"Failed to connect to {self.endpoint}, got: '{r.text[:200]}...'", 0
             )
@@ -73,7 +76,7 @@ class LnTipsWallet(Wallet):
             try:
                 data = r.json()
                 error_message = data["message"]
-            except:
+            except Exception:
                 error_message = r.text
 
             return InvoiceResponse(False, None, None, error_message)
@@ -96,7 +99,7 @@ class LnTipsWallet(Wallet):
             try:
                 data = r.json()
                 error_message = data["error"]
-            except:
+            except Exception:
                 error_message = r.text
             return PaymentResponse(False, None, 0, None, error_message)
 
@@ -117,7 +120,7 @@ class LnTipsWallet(Wallet):
 
             data = r.json()
             return PaymentStatus(data["paid"])
-        except:
+        except Exception:
             return PaymentStatus(None)
 
     async def get_payment_status(self, checking_id: str) -> PaymentStatus:
@@ -132,7 +135,7 @@ class LnTipsWallet(Wallet):
 
             paid_to_status = {False: None, True: True}
             return PaymentStatus(paid_to_status[data.get("paid")])
-        except:
+        except Exception:
             return PaymentStatus(None)
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
@@ -151,7 +154,7 @@ class LnTipsWallet(Wallet):
                             inv = json.loads(data)
                             if not inv.get("payment_hash"):
                                 continue
-                        except:
+                        except Exception:
                             continue
                         yield inv["payment_hash"]
             except Exception:
@@ -161,6 +164,7 @@ class LnTipsWallet(Wallet):
             # since the backend is expected to drop the connection after 90s
             if last_connected is None or time.time() - last_connected < 10:
                 logger.error(
-                    f"lost connection to {self.endpoint}/api/v1/invoicestream, retrying in 5 seconds"
+                    f"lost connection to {self.endpoint}/api/v1/invoicestream, retrying"
+                    " in 5 seconds"
                 )
                 await asyncio.sleep(5)
