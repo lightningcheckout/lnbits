@@ -9,7 +9,6 @@ body[data-theme=lnc].body--dark,
 body[data-theme='lnc'].body--dark {
   background: scale-color($color, $lightness: -60%);
 }
-
 */
 [data-theme=lnc] .q-card--dark,
 [data-theme=lnc] .q-stepper--dark {
