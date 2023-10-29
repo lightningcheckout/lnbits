@@ -1,7 +1,7 @@
 [data-theme=classic] .q-drawer--dark,
 body[data-theme=classic].body--dark,
 [data-theme=classic] .q-menu--dark {
-  background: #1f2234 !important;
+  background: #0a0a0a !important;
 }
 
 /* IF WANTING TO SET A DARKER BG COLOR IN THE FUTURE
@@ -16,22 +16,22 @@ body[data-theme='classic'].body--dark {
 }
 
 [data-theme=classic] .bg-primary {
-  background: #673ab7 !important;
+  background: #ffb400 !important;
 }
 [data-theme=classic] .text-primary {
-  color: #673ab7 !important;
+  color: #ffb400 !important;
 }
 [data-theme=classic] .bg-secondary {
-  background: #9c27b0 !important;
+  background: #ffb400 !important;
 }
 [data-theme=classic] .text-secondary {
-  color: #9c27b0 !important;
+  color: #ffb400 !important;
 }
 [data-theme=classic] .bg-dark {
-  background: #1f2234 !important;
+  background: #0a0a0a !important;
 }
 [data-theme=classic] .text-dark {
-  color: #1f2234 !important;
+  color: #0a0a0a !important;
 }
 [data-theme=classic] .bg-info {
   background: #333646 !important;
@@ -40,10 +40,10 @@ body[data-theme='classic'].body--dark {
   color: #333646 !important;
 }
 [data-theme=classic] .bg-marginal-bg {
-  background: #1f2234 !important;
+  background: #2d293b !important;
 }
 [data-theme=classic] .text-marginal-bg {
-  color: #1f2234 !important;
+  color: #2d293b !important;
 }
 [data-theme=classic] .bg-marginal-text {
   background: #fff !important;
