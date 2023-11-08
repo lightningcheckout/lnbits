@@ -1,12 +1,4 @@
 $themes: (
-  'lnc': (
-    primary: #ffb400,
-    secondary: #ffb400,
-    dark: #0a0a0a,
-    info: #333646,
-    marginal-bg: #2d293b,
-    marginal-text: #fff
-  ),
   'classic': (
     primary: #ffb400,
     secondary: #ffb400,
@@ -104,14 +96,6 @@ $themes: (
       }
     }
   }
-}
-
-[data-theme='lnc'] .q-drawer--dark {
-  background: #0a0a0a !important;
-}
-
-[data-theme='lnc'] .q-header {
-  background: #0a0a0a !important;
 }
 
 [data-theme='freedom'] .q-drawer--dark {
