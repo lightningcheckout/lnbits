@@ -35,11 +35,13 @@ class LNbitsSettings(BaseModel):
 class UsersSettings(LNbitsSettings):
     lnbits_admin_users: List[str] = Field(default=[])
     lnbits_allowed_users: List[str] = Field(default=[])
-    lnbits_allow_new_accounts: bool = Field(default=True)
+    lnbits_allow_new_accounts: bool = Field(default=False)
 
     @property
     def new_accounts_allowed(self) -> bool:
-        return self.lnbits_allow_new_accounts and len(self.lnbits_allowed_users) == 0
+        # Disabled new accounts by default, only allow via usermanager
+        return False
+        #return self.lnbits_allow_new_accounts and len(self.lnbits_allowed_users) == 0
 
 
 class ExtensionsSettings(LNbitsSettings):
