@@ -217,17 +217,21 @@ class CoreLightningNode(Node):
                 state=(
                     ChannelState.ACTIVE
                     if ch["state"] == "CHANNELD_NORMAL"
-                    else ChannelState.PENDING
-                    if ch["state"] in ("CHANNELD_AWAITING_LOCKIN", "OPENINGD")
-                    else ChannelState.CLOSED
-                    if ch["state"]
-                    in (
-                        "CHANNELD_CLOSING",
-                        "CLOSINGD_COMPLETE",
-                        "CLOSINGD_SIGEXCHANGE",
-                        "ONCHAIN",
+                    else (
+                        ChannelState.PENDING
+                        if ch["state"] in ("CHANNELD_AWAITING_LOCKIN", "OPENINGD")
+                        else (
+                            ChannelState.CLOSED
+                            if ch["state"]
+                            in (
+                                "CHANNELD_CLOSING",
+                                "CLOSINGD_COMPLETE",
+                                "CLOSINGD_SIGEXCHANGE",
+                                "ONCHAIN",
+                            )
+                            else ChannelState.INACTIVE
+                        )
                     )
-                    else ChannelState.INACTIVE
                 ),
             )
             for ch in funds["channels"]
@@ -310,10 +314,17 @@ class CoreLightningNode(Node):
         return Page(
             data=[
                 NodeInvoice(
-                    bolt11=invoice["bolt11"],
-                    amount=invoice["amount_msat"],
+                    bolt11=invoice.get("bolt11") or invoice.get("bolt12"),
+                    amount=(
+                        # normal invoice
+                        invoice.get("amount_msat")
+                        # keysend or paid amountless invoice
+                        or invoice.get("amount_received_msat")
+                        # unpaid amountless invoice
+                        or 0
+                    ),
                     preimage=invoice.get("payment_preimage"),
-                    memo=invoice["description"],
+                    memo=invoice.get("description"),
                     paid_at=invoice.get("paid_at"),
                     expiry=invoice["expires_at"],
                     payment_hash=invoice["payment_hash"],

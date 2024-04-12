@@ -10,6 +10,7 @@ from lnbits.settings import settings
 
 from .base import (
     InvoiceResponse,
+    PaymentPendingStatus,
     PaymentResponse,
     PaymentStatus,
     StatusResponse,
@@ -21,9 +22,10 @@ class ClicheWallet(Wallet):
     """https://github.com/fiatjaf/cliche"""
 
     def __init__(self):
-        self.endpoint = settings.cliche_endpoint
-        if not self.endpoint:
-            raise Exception("cannot initialize cliche")
+        if not settings.cliche_endpoint:
+            raise ValueError("cannot initialize ClicheWallet: missing cliche_endpoint")
+
+        self.endpoint = self.normalize_endpoint(settings.cliche_endpoint)
 
     async def status(self) -> StatusResponse:
         try:
@@ -138,7 +140,7 @@ class ClicheWallet(Wallet):
 
         if data.get("error") is not None and data["error"].get("message"):
             logger.error(data["error"]["message"])
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
 
         statuses = {"pending": None, "complete": True, "failed": False}
         return PaymentStatus(statuses[data["result"]["status"]])
@@ -151,7 +153,7 @@ class ClicheWallet(Wallet):
 
         if data.get("error") is not None and data["error"].get("message"):
             logger.error(data["error"]["message"])
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
         payment = data["result"]
         statuses = {"pending": None, "complete": True, "failed": False}
         return PaymentStatus(

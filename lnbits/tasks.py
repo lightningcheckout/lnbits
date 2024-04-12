@@ -4,9 +4,8 @@ import time
 import traceback
 import uuid
 from http import HTTPStatus
-from typing import Dict, List, Optional
+from typing import Coroutine, Dict, List, Optional
 
-from fastapi.exceptions import HTTPException
 from loguru import logger
 from py_vapid import Vapid
 from pywebpush import WebPushException, webpush
@@ -14,15 +13,14 @@ from pywebpush import WebPushException, webpush
 from lnbits.core.crud import (
     delete_expired_invoices,
     delete_webpush_subscriptions,
-    get_balance_checks,
     get_payments,
     get_standalone_payment,
 )
-from lnbits.core.services import redeem_lnurl_withdraw
 from lnbits.settings import settings
 from lnbits.wallets import get_wallet_class
 
 tasks: List[asyncio.Task] = []
+unique_tasks: Dict[str, asyncio.Task] = {}
 
 
 def create_task(coro):
@@ -35,12 +33,33 @@ def create_permanent_task(func):
     return create_task(catch_everything_and_restart(func))
 
 
+def create_unique_task(name: str, coro: Coroutine):
+    if unique_tasks.get(name):
+        logger.warning(f"task `{name}` already exists, cancelling it")
+        try:
+            unique_tasks[name].cancel()
+        except Exception as exc:
+            logger.warning(f"error while cancelling task `{name}`: {str(exc)}")
+    task = asyncio.create_task(coro)
+    unique_tasks[name] = task
+    return task
+
+
+def create_permanent_unique_task(name: str, coro: Coroutine):
+    return create_unique_task(name, catch_everything_and_restart(coro))
+
+
 def cancel_all_tasks():
     for task in tasks:
         try:
             task.cancel()
         except Exception as exc:
             logger.warning(f"error while cancelling task: {str(exc)}")
+    for name, task in unique_tasks.items():
+        try:
+            task.cancel()
+        except Exception as exc:
+            logger.warning(f"error while cancelling task `{name}`: {str(exc)}")
 
 
 async def catch_everything_and_restart(func):
@@ -56,57 +75,25 @@ async def catch_everything_and_restart(func):
         await catch_everything_and_restart(func)
 
 
-async def send_push_promise(a, b) -> None:
-    pass
+invoice_listeners: Dict[str, asyncio.Queue] = {}
 
 
-class SseListenersDict(dict):
-    """
-    A dict of sse listeners.
-    """
-
-    def __init__(self, name: Optional[str] = None):
-        self.name = name or f"sse_listener_{str(uuid.uuid4())[:8]}"
-
-    def __setitem__(self, key, value):
-        assert isinstance(key, str), f"{key} is not a string"
-        assert isinstance(value, asyncio.Queue), f"{value} is not an asyncio.Queue"
-        logger.trace(f"sse: adding listener {key} to {self.name}. len = {len(self)+1}")
-        return super().__setitem__(key, value)
-
-    def __delitem__(self, key):
-        logger.trace(f"sse: removing listener from {self.name}. len = {len(self)-1}")
-        return super().__delitem__(key)
-
-    _RaiseKeyError = object()  # singleton for no-default behavior
-
-    def pop(self, key, v=_RaiseKeyError) -> None:
-        logger.trace(f"sse: removing listener from {self.name}. len = {len(self)-1}")
-        return super().pop(key)
-
-
-invoice_listeners: Dict[str, asyncio.Queue] = SseListenersDict("invoice_listeners")
-
-
+# TODO: name should not be optional
+# some extensions still dont use a name, but they should
 def register_invoice_listener(send_chan: asyncio.Queue, name: Optional[str] = None):
     """
     A method intended for extensions (and core/tasks.py) to call when they want to be
     notified about new invoice payments incoming. Will emit all incoming payments.
     """
-    name_unique = f"{name or 'no_name'}_{str(uuid.uuid4())[:8]}"
-    logger.trace(f"sse: registering invoice listener {name_unique}")
-    invoice_listeners[name_unique] = send_chan
+    if not name:
+        # fallback to a random name if extension didn't provide one
+        name = f"no_name_{str(uuid.uuid4())[:8]}"
 
+    if invoice_listeners.get(name):
+        logger.warning(f"invoice listener `{name}` already exists, replacing it")
 
-async def webhook_handler():
-    """
-    Returns the webhook_handler for the selected wallet if present. Used by API.
-    """
-    WALLET = get_wallet_class()
-    handler = getattr(WALLET, "webhook_listener", None)
-    if handler:
-        return await handler()
-    raise HTTPException(status_code=HTTPStatus.NO_CONTENT)
+    logger.trace(f"registering invoice listener `{name}`")
+    invoice_listeners[name] = send_chan
 
 
 internal_invoice_queue: asyncio.Queue = asyncio.Queue(0)
@@ -122,7 +109,7 @@ async def internal_invoice_listener():
     while True:
         checking_id = await internal_invoice_queue.get()
         logger.info("> got internal payment notification", checking_id)
-        asyncio.create_task(invoice_callback_dispatcher(checking_id))
+        create_task(invoice_callback_dispatcher(checking_id))
 
 
 async def invoice_listener():
@@ -135,7 +122,7 @@ async def invoice_listener():
     WALLET = get_wallet_class()
     async for checking_id in WALLET.paid_invoices_stream():
         logger.info("> got a payment notification", checking_id)
-        asyncio.create_task(invoice_callback_dispatcher(checking_id))
+        create_task(invoice_callback_dispatcher(checking_id))
 
 
 async def check_pending_payments():
@@ -186,14 +173,6 @@ async def check_pending_payments():
         await asyncio.sleep(60 * 30)  # every 30 minutes
 
 
-async def perform_balance_checks():
-    while True:
-        for bc in await get_balance_checks():
-            await redeem_lnurl_withdraw(bc.wallet, bc.url)
-
-        await asyncio.sleep(60 * 60 * 6)  # every 6 hours
-
-
 async def invoice_callback_dispatcher(checking_id: str):
     """
     Takes incoming payments, sets pending=False, and dispatches them to
@@ -201,10 +180,12 @@ async def invoice_callback_dispatcher(checking_id: str):
     """
     payment = await get_standalone_payment(checking_id, incoming=True)
     if payment and payment.is_in:
-        logger.trace(f"sse sending invoice callback for payment {checking_id}")
+        logger.trace(
+            f"invoice listeners: sending invoice callback for payment {checking_id}"
+        )
         await payment.set_pending(False)
-        for chan_name, send_chan in invoice_listeners.items():
-            logger.trace(f"sse sending to chan: {chan_name}")
+        for name, send_chan in invoice_listeners.items():
+            logger.trace(f"invoice listeners: sending to `{name}`")
             await send_chan.put(payment)
 
 

@@ -2,7 +2,7 @@
   description = "LNbits, free and open-source Lightning wallet and accounts system";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-23.11";
     poetry2nix = {
       url = "github:nix-community/poetry2nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -13,19 +13,11 @@
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forSystems = systems: f:
         nixpkgs.lib.genAttrs systems
-        (system: f system (import nixpkgs { inherit system; overlays = [ poetry2nix.overlay self.overlays.default ]; }));
+        (system: f system (import nixpkgs { inherit system; overlays = [ poetry2nix.overlays.default self.overlays.default ]; }));
       forAllSystems = forSystems supportedSystems;
       projectName = "lnbits";
     in
     {
-      devShells = forAllSystems (system: pkgs: {
-        default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            nodePackages.prettier
-            poetry
-          ];
-        };
-      });
       overlays = {
         default = final: prev: {
           ${projectName} = self.packages.${prev.stdenv.hostPlatform.system}.${projectName};
@@ -36,20 +28,18 @@
         ${projectName} = pkgs.poetry2nix.mkPoetryApplication {
           projectDir = ./.;
           meta.rev = self.dirtyRev or self.rev;
+          meta.mainProgram = projectName;
           overrides = pkgs.poetry2nix.overrides.withDefaults (final: prev: {
+            protobuf = prev.protobuf.override { preferWheel = true; };
             ruff = prev.ruff.override { preferWheel = true; };
-            fastapi = prev.fastapi.overridePythonAttrs (old: {
-              postPatch = ''
-                substituteInPlace pyproject.toml \
-                  --replace '"Framework :: Pydantic",' "" \
-                  --replace '"Framework :: Pydantic :: 1",' ""
-              '';
-            });
-            bolt11 = prev.bolt11.overrideAttrs (old: {
-              nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
-                prev.poetry
-              ];
-            });
+            wallycore = prev.wallycore.override { preferWheel = true; };
+            # remove the following override when https://github.com/nix-community/poetry2nix/pull/1563 is merged
+            asgi-lifespan = prev.asgi-lifespan.overridePythonAttrs (
+              old: { buildInputs = (old.buildInputs or []) ++ [ prev.setuptools ]; }
+            );
+            pytest-md = prev.pytest-md.overridePythonAttrs (
+              old: { buildInputs = (old.buildInputs or []) ++ [ prev.setuptools ]; }
+            );
           });
         };
       });

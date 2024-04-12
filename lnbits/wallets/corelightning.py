@@ -12,8 +12,11 @@ from lnbits.settings import settings
 
 from .base import (
     InvoiceResponse,
+    PaymentFailedStatus,
+    PaymentPendingStatus,
     PaymentResponse,
     PaymentStatus,
+    PaymentSuccessStatus,
     StatusResponse,
     Unsupported,
     Wallet,
@@ -29,9 +32,13 @@ class CoreLightningWallet(Wallet):
     __node_cls__ = CoreLightningNode
 
     def __init__(self):
-        self.rpc = settings.corelightning_rpc or settings.clightning_rpc
-        self.ln = LightningRpc(self.rpc)
+        rpc = settings.corelightning_rpc or settings.clightning_rpc
+        if not rpc:
+            raise ValueError(
+                "cannot initialize CoreLightningWallet: missing corelightning_rpc"
+            )
 
+        self.ln = LightningRpc(rpc)
         # check if description_hash is supported (from corelightning>=v0.11.0)
         command = self.ln.help("invoice")["help"][0]["command"]  # type: ignore
         self.supports_description_hash = "deschashonly" in command
@@ -135,8 +142,6 @@ class CoreLightningWallet(Wallet):
                     f" '{exc.error.get('message') or exc.error}'."  # type: ignore
                 )
             return PaymentResponse(False, None, None, None, error_message)
-        except Exception as exc:
-            return PaymentResponse(False, None, None, None, str(exc))
 
         fee_msat = -int(r["amount_sent_msat"] - r["amount_msat"])
         return PaymentResponse(
@@ -147,30 +152,34 @@ class CoreLightningWallet(Wallet):
         try:
             r: dict = self.ln.listinvoices(payment_hash=checking_id)  # type: ignore
         except RpcError:
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
         if not r["invoices"]:
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
 
         invoice_resp = r["invoices"][-1]
 
         if invoice_resp["payment_hash"] == checking_id:
             if invoice_resp["status"] == "paid":
-                return PaymentStatus(True)
+                return PaymentSuccessStatus()
             elif invoice_resp["status"] == "unpaid":
-                return PaymentStatus(None)
+                return PaymentPendingStatus()
             elif invoice_resp["status"] == "expired":
-                return PaymentStatus(False)
+                return PaymentFailedStatus()
         else:
             logger.warning(f"supplied an invalid checking_id: {checking_id}")
-        return PaymentStatus(None)
+        return PaymentPendingStatus()
 
     async def get_payment_status(self, checking_id: str) -> PaymentStatus:
         try:
             r: dict = self.ln.listpays(payment_hash=checking_id)  # type: ignore
         except Exception:
-            return PaymentStatus(None)
-        if "pays" not in r or not r["pays"]:
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
+        if "pays" not in r:
+            return PaymentPendingStatus()
+        if not r["pays"]:
+            # no payment with this payment_hash is found
+            return PaymentFailedStatus()
+
         payment_resp = r["pays"][-1]
 
         if payment_resp["payment_hash"] == checking_id:
@@ -180,14 +189,16 @@ class CoreLightningWallet(Wallet):
                     payment_resp["amount_sent_msat"] - payment_resp["amount_msat"]
                 )
 
-                return PaymentStatus(True, fee_msat, payment_resp["preimage"])
+                return PaymentSuccessStatus(
+                    fee_msat=fee_msat, preimage=payment_resp["preimage"]
+                )
             elif status == "failed":
-                return PaymentStatus(False)
+                return PaymentFailedStatus()
             else:
-                return PaymentStatus(None)
+                return PaymentPendingStatus()
         else:
             logger.warning(f"supplied an invalid checking_id: {checking_id}")
-        return PaymentStatus(None)
+        return PaymentPendingStatus()
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
         while True:

@@ -9,6 +9,7 @@ from lnbits.settings import settings
 
 from .base import (
     InvoiceResponse,
+    PaymentPendingStatus,
     PaymentResponse,
     PaymentStatus,
     StatusResponse,
@@ -20,16 +21,28 @@ class LNPayWallet(Wallet):
     """https://docs.lnpay.co/"""
 
     def __init__(self):
-        endpoint = settings.lnpay_api_endpoint
+        if not settings.lnpay_api_endpoint:
+            raise ValueError(
+                "cannot initialize LNPayWallet: missing lnpay_api_endpoint"
+            )
+        if not settings.lnpay_api_key:
+            raise ValueError("cannot initialize LNPayWallet: missing lnpay_api_key")
+
         wallet_key = settings.lnpay_wallet_key or settings.lnpay_admin_key
-
-        if not endpoint or not wallet_key or not settings.lnpay_api_key:
-            raise Exception("cannot initialize lnpay")
-
+        if not wallet_key:
+            raise ValueError(
+                "cannot initialize LNPayWallet: "
+                "missing lnpay_wallet_key or lnpay_admin_key"
+            )
         self.wallet_key = wallet_key
-        self.endpoint = endpoint[:-1] if endpoint.endswith("/") else endpoint
-        self.auth = {"X-Api-Key": settings.lnpay_api_key}
-        self.client = httpx.AsyncClient(base_url=self.endpoint, headers=self.auth)
+
+        self.endpoint = self.normalize_endpoint(settings.lnpay_api_endpoint)
+
+        headers = {
+            "X-Api-Key": settings.lnpay_api_key,
+            "User-Agent": settings.user_agent,
+        }
+        self.client = httpx.AsyncClient(base_url=self.endpoint, headers=headers)
 
     async def cleanup(self):
         try:
@@ -122,7 +135,7 @@ class LNPayWallet(Wallet):
         )
 
         if r.is_error:
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
 
         data = r.json()
         preimage = data["payment_preimage"]
@@ -135,28 +148,3 @@ class LNPayWallet(Wallet):
         while True:
             value = await self.queue.get()
             yield value
-
-    async def webhook_listener(self):
-        logger.error("LNPay webhook listener disabled.")
-        return
-        # TODO: request.get_data is undefined, was it something with Flask or quart?
-        # probably issue introduced when refactoring?
-        # text: str = await request.get_data()
-        # try:
-        #     data = json.loads(text)
-        # except json.decoder.JSONDecodeError:
-        #     logger.error(f"error on lnpay webhook endpoint: {text[:200]}")
-        #     data = None
-        # if (
-        #     type(data) is not dict
-        #     or "event" not in data
-        #     or data["event"].get("name") != "wallet_receive"
-        # ):
-        #     raise HTTPException(status_code=HTTPStatus.NO_CONTENT)
-
-        # lntx_id = data["data"]["wtx"]["lnTx"]["id"]
-        # r = await self.client.get(f"/lntx/{lntx_id}?fields=settled")
-        # data = r.json()
-        # if data["settled"]:
-        #     await self.queue.put(lntx_id)
-        # raise HTTPException(status_code=HTTPStatus.NO_CONTENT)

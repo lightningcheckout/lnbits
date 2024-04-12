@@ -9,8 +9,11 @@ from lnbits.settings import settings
 
 from .base import (
     InvoiceResponse,
+    PaymentFailedStatus,
+    PaymentPendingStatus,
     PaymentResponse,
     PaymentStatus,
+    PaymentSuccessStatus,
     StatusResponse,
     Wallet,
 )
@@ -20,16 +23,21 @@ class LNbitsWallet(Wallet):
     """https://github.com/lnbits/lnbits"""
 
     def __init__(self):
-        self.endpoint = settings.lnbits_endpoint
+        if not settings.lnbits_endpoint:
+            raise ValueError("cannot initialize LNbitsWallet: missing lnbits_endpoint")
         key = (
             settings.lnbits_key
             or settings.lnbits_admin_key
             or settings.lnbits_invoice_key
         )
-        if not self.endpoint or not key:
-            raise Exception("cannot initialize lnbits wallet")
-        self.key = {"X-Api-Key": key}
-        self.client = httpx.AsyncClient(base_url=self.endpoint, headers=self.key)
+        if not key:
+            raise ValueError(
+                "cannot initialize LNbitsWallet: "
+                "missing lnbits_key or lnbits_admin_key or lnbits_invoice_key"
+            )
+        self.endpoint = self.normalize_endpoint(settings.lnbits_endpoint)
+        self.headers = {"X-Api-Key": key, "User-Agent": settings.user_agent}
+        self.client = httpx.AsyncClient(base_url=self.endpoint, headers=self.headers)
 
     async def cleanup(self):
         try:
@@ -114,29 +122,44 @@ class LNbitsWallet(Wallet):
             r = await self.client.get(
                 url=f"/api/v1/payments/{checking_id}",
             )
-            if r.is_error:
-                return PaymentStatus(None)
-            return PaymentStatus(r.json()["paid"])
+            r.raise_for_status()
+
+            data = r.json()
+            details = data.get("details", None)
+
+            if details and details.get("pending", False) is True:
+                return PaymentPendingStatus()
+            if data.get("paid", False) is True:
+                return PaymentSuccessStatus()
+            return PaymentFailedStatus()
         except Exception:
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
 
     async def get_payment_status(self, checking_id: str) -> PaymentStatus:
         r = await self.client.get(url=f"/api/v1/payments/{checking_id}")
 
         if r.is_error:
-            return PaymentStatus(False)
+            return PaymentPendingStatus()
         data = r.json()
-        if "paid" not in data and "details" not in data:
-            return PaymentStatus(None)
 
-        return PaymentStatus(data["paid"], data["details"]["fee"], data["preimage"])
+        if "paid" not in data or not data["paid"]:
+            return PaymentPendingStatus()
+
+        if "details" not in data:
+            return PaymentPendingStatus()
+
+        return PaymentSuccessStatus(
+            fee_msat=data["details"]["fee"], preimage=data["preimage"]
+        )
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
         url = f"{self.endpoint}/api/v1/payments/sse"
 
         while True:
             try:
-                async with httpx.AsyncClient(timeout=None, headers=self.key) as client:
+                async with httpx.AsyncClient(
+                    timeout=None, headers=self.headers
+                ) as client:
                     del client.headers[
                         "accept-encoding"
                     ]  # we have to disable compression for SSEs

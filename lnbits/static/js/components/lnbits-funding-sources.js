@@ -50,7 +50,8 @@ Vue.component('lnbits-funding-sources', {
             lnd_rest_endpoint: 'Endpoint',
             lnd_rest_cert: 'Certificate',
             lnd_rest_macaroon: 'Macaroon',
-            lnd_rest_macaroon_encrypted: 'Encrypted Macaroon'
+            lnd_rest_macaroon_encrypted: 'Encrypted Macaroon',
+            lnd_rest_route_hints: 'Enable Route Hints'
           }
         ],
         [
@@ -95,6 +96,22 @@ Vue.component('lnbits-funding-sources', {
           {
             lnbits_endpoint: 'Endpoint',
             lnbits_key: 'Admin Key'
+          }
+        ],
+        [
+          'AlbyWallet',
+          'Alby',
+          {
+            alby_api_endpoint: 'Endpoint',
+            alby_access_token: 'Key'
+          }
+        ],
+        [
+          'ZBDWallet',
+          'ZBD',
+          {
+            zbd_api_endpoint: 'Endpoint',
+            zbd_api_key: 'Key'
           }
         ],
         [

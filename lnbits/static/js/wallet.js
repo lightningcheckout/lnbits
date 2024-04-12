@@ -90,6 +90,7 @@ new Vue({
   mixins: [windowMixin],
   data: function () {
     return {
+      origin: window.location.origin,
       user: LNbits.map.user(window.user),
       receive: {
         show: false,
@@ -113,7 +114,8 @@ new Vue({
         data: {
           request: '',
           amount: 0,
-          comment: ''
+          comment: '',
+          unit: 'sat'
         },
         paymentChecker: null,
         copy: {
@@ -149,7 +151,7 @@ new Vue({
           descending: true,
           rowsNumber: 10
         },
-        filter: null,
+        search: null,
         loading: false
       },
       paymentsCSV: {
@@ -241,6 +243,8 @@ new Vue({
         location: window.location
       },
       balance: 0,
+      fiatBalance: 0,
+      mobileSimple: false,
       credit: 0,
       update: {
         name: null,
@@ -256,11 +260,25 @@ new Vue({
         return LNbits.utils.formatSat(this.balance || this.g.wallet.sat)
       }
     },
+    formattedFiatBalance() {
+      if (this.fiatBalance) {
+        return LNbits.utils.formatCurrency(
+          this.fiatBalance.toFixed(2),
+          this.g.wallet.currency
+        )
+      }
+    },
     filteredPayments: function () {
-      var q = this.paymentsTable.filter
+      var q = this.paymentsTable.search
       if (!q || q === '') return this.payments
 
       return LNbits.utils.search(this.payments, q)
+    },
+    paymentsOmitter() {
+      if (this.$q.screen.lt.md && this.mobileSimple) {
+        return this.payments.length > 0 ? [this.payments[0]] : []
+      }
+      return this.payments
     },
     canPay: function () {
       if (!this.parse.invoice) return false
@@ -270,12 +288,10 @@ new Vue({
       return this.payments.findIndex(payment => payment.pending) !== -1
     }
   },
-  filters: {
+  methods: {
     msatoshiFormat: function (value) {
       return LNbits.utils.formatSat(value / 1000)
-    }
-  },
-  methods: {
+    },
     paymentTableRowKey: function (row) {
       return row.payment_hash + row.amount
     },
@@ -337,33 +353,6 @@ new Vue({
       this.parse.camera.show = false
       this.focusInput('textArea')
     },
-    updateBalance: function (credit) {
-      LNbits.api
-        .request(
-          'PUT',
-          '/admin/api/v1/topup/?usr=' + this.g.user.id,
-          this.g.user.wallets[0].adminkey,
-          {
-            amount: credit,
-            id: this.g.wallet.id
-          }
-        )
-        .then(response => {
-          this.$q.notify({
-            type: 'positive',
-            message:
-              'Success! Added ' +
-              credit +
-              ' sats to ' +
-              this.g.user.wallets[0].id,
-            icon: null
-          })
-          this.balance += parseInt(credit)
-        })
-        .catch(function (error) {
-          LNbits.utils.notifyApiError(error)
-        })
-    },
     closeParseDialog: function () {
       setTimeout(() => {
         clearInterval(this.parse.paymentChecker)
@@ -371,7 +360,6 @@ new Vue({
     },
     onPaymentReceived: function (paymentHash) {
       this.fetchPayments()
-      this.fetchBalance()
 
       if (this.receive.paymentHash === paymentHash) {
         this.receive.show = false
@@ -600,7 +588,6 @@ new Vue({
                   clearInterval(this.parse.paymentChecker)
                   dismissPaymentMsg()
                   this.fetchPayments()
-                  this.fetchBalance()
                 }
               })
           }, 2000)
@@ -623,7 +610,8 @@ new Vue({
           this.parse.lnurlpay.description_hash,
           this.parse.data.amount * 1000,
           this.parse.lnurlpay.description.slice(0, 120),
-          this.parse.data.comment
+          this.parse.data.comment,
+          this.parse.data.unit
         )
         .then(response => {
           this.parse.show = false
@@ -640,8 +628,6 @@ new Vue({
                   dismissPaymentMsg()
                   clearInterval(this.parse.paymentChecker)
                   this.fetchPayments()
-                  this.fetchBalance()
-
                   // show lnurlpay success action
                   if (response.data.success_action) {
                     switch (response.data.success_action.tag) {
@@ -760,23 +746,9 @@ new Vue({
         })
     },
     fetchPayments: function (props) {
-      // Props are passed by qasar when pagination or sorting changes
-      if (props) {
-        this.paymentsTable.pagination = props.pagination
-      }
-      let pagination = this.paymentsTable.pagination
-      this.paymentsTable.loading = true
-      const query = {
-        limit: pagination.rowsPerPage,
-        offset: (pagination.page - 1) * pagination.rowsPerPage,
-        sortby: pagination.sortBy ?? 'time',
-        direction: pagination.descending ? 'desc' : 'asc'
-      }
-      if (this.paymentsTable.filter) {
-        query.search = this.paymentsTable.filter
-      }
+      const params = LNbits.utils.prepareFilterQuery(this.paymentsTable, props)
       return LNbits.api
-        .getPayments(this.g.wallet, query)
+        .getPayments(this.g.wallet, params)
         .then(response => {
           this.paymentsTable.loading = false
           this.paymentsTable.pagination.rowsNumber = response.data.total
@@ -791,18 +763,45 @@ new Vue({
     },
     fetchBalance: function () {
       LNbits.api.getWallet(this.g.wallet).then(response => {
-        this.balance = Math.round(response.data.balance / 1000)
+        this.balance = Math.floor(response.data.balance / 1000)
         EventHub.$emit('update-wallet-balance', [
           this.g.wallet.id,
           this.balance
         ])
       })
+      if (this.g.wallet.currency) {
+        this.updateFiatBalance()
+      }
+    },
+    updateFiatBalance() {
+      if (!this.g.wallet.currency) return 0
+      LNbits.api
+        .request('POST', `/api/v1/conversion`, null, {
+          amount: this.balance || this.g.wallet.sat,
+          to: this.g.wallet.currency
+        })
+        .then(response => {
+          this.fiatBalance = response.data[this.g.wallet.currency]
+        })
+        .catch(e => console.error(e))
+    },
+    formatFiat(currency, amount) {
+      return LNbits.utils.formatCurrency(amount, currency)
+    },
+    updateBalanceCallback: function (res) {
+      this.balance += res.value
     },
     exportCSV: function () {
       // status is important for export but it is not in paymentsTable
       // because it is manually added with payment detail link and icons
       // and would cause duplication in the list
-      LNbits.api.getPayments(this.g.wallet, {}).then(response => {
+      const pagination = this.paymentsTable.pagination
+      const query = {
+        sortby: pagination.sortBy ?? 'time',
+        direction: pagination.descending ? 'desc' : 'asc'
+      }
+      const params = new URLSearchParams(query)
+      LNbits.api.getPayments(this.g.wallet, params).then(response => {
         const payments = response.data.data.map(LNbits.map.payment)
         LNbits.utils.exportCSV(
           this.paymentsCSV.columns,
@@ -827,20 +826,21 @@ new Vue({
     }
   },
   created: function () {
-    this.fetchBalance()
+    let urlParams = new URLSearchParams(window.location.search)
+    if (urlParams.has('lightning') || urlParams.has('lnurl')) {
+      this.parse.data.request =
+        urlParams.get('lightning') || urlParams.get('lnurl')
+      this.decodeRequest()
+      this.parse.show = true
+    }
+    if (this.$q.screen.lt.md) {
+      this.mobileSimple = true
+    }
     this.fetchPayments()
 
     this.update.name = this.g.wallet.name
     this.update.currency = this.g.wallet.currency
-
-    LNbits.api
-      .request('GET', '/api/v1/currencies')
-      .then(response => {
-        this.receive.units = ['sat', ...response.data]
-      })
-      .catch(err => {
-        LNbits.utils.notifyApiError(err)
-      })
+    this.receive.units = ['sat', ...window.currencies]
   },
   mounted: function () {
     // show disclaimer
@@ -848,11 +848,11 @@ new Vue({
       this.disclaimerDialog.show = true
       this.$q.localStorage.set('lnbits.disclaimerShown', true)
     }
-
     // listen to incoming payments
     LNbits.events.onInvoicePaid(this.g.wallet, payment =>
       this.onPaymentReceived(payment.payment_hash)
     )
+    eventReactionWebocket(wallet.id)
   }
 })
 

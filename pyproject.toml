@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "lnbits"
-version = "0.11.1"
+version = "0.12.5"
 description = "LNbits, free and open-source Lightning wallet and accounts system."
 authors = ["Alan Bits <alan@lnbits.com>"]
 
@@ -9,10 +9,10 @@ python = "^3.10 | ^3.9"
 bech32 = "1.2.0"
 click = "8.1.7"
 ecdsa = "0.18.0"
-fastapi = "0.103.1"
+fastapi = "0.109.2"
 httpx = "0.25.0"
-jinja2 = "3.0.1"
-lnurl = "0.3.6"
+jinja2 = "3.1.3"
+lnurl = "0.4.2"
 psycopg2-binary = "2.9.7"
 pydantic = "1.10.9"
 pyqrcode = "1.2.1"
@@ -29,12 +29,17 @@ grpcio = "1.58.0"
 protobuf = "4.24.3"
 pyln-client = "23.8"
 pywebpush = "1.14.0"
-slowapi = "0.1.8"
-python-dotenv = "1.0.0"
+slowapi = "0.1.9"
 websocket-client = "1.6.3"
-pycryptodomex = "3.19.0"
+pycryptodomex = "3.19.1"
 packaging = "23.1"
 bolt11 = "2.0.5"
+# needed for new login methods: username-password, google-auth, github-auth
+bcrypt = "^4.1.1"
+python-jose = "^3.3.0"
+passlib = "^1.7.4"
+itsdangerous = "^2.1.2"
+fastapi-sso = "^0.9.1"
 # needed for boltz, lnurldevice, watchonly extensions
 embit = "0.7.0"
 # needed for cashu, lnurlp, nostrclient, nostrmarket, nostrrelay extensions
@@ -43,9 +48,14 @@ secp256k1 = "0.14.0"
 environs = "9.5.0"
 # needed for scheduler extension
 python-crontab = "3.0.0"
+# needed for liquid support boltz
+wallycore = {version = "^1.0.0", optional = true}
+
+[tool.poetry.extras]
+liquid = ["wallycore"]
 
 [tool.poetry.group.dev.dependencies]
-black = "^23.7.0"
+black = "^24.3.0"
 pytest-asyncio = "^0.21.0"
 pytest = "^7.3.2"
 pytest-cov = "^4.1.0"
@@ -53,10 +63,17 @@ mypy = "^1.5.1"
 types-protobuf = "^4.24.0.2"
 pre-commit = "^3.2.2"
 openapi-spec-validator = "^0.6.0"
-ruff = "^0.0.291"
+ruff = "^0.3.2"
 # not our dependency but needed indirectly by openapi-spec-validator
 # we want to use 0.10.3 because newer versions are broken on nix
 rpds-py = "0.10.3"
+types-passlib = "^1.7.7.13"
+types-python-jose = "^3.3.4.8"
+openai = "^1.12.0"
+json5 = "^0.9.17"
+asgi-lifespan = "^2.1.0"
+pytest-md = "^0.2.0"
+pytest-httpserver = "^1.0.10"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -68,7 +85,9 @@ lnbits-cli = "lnbits.commands:main"
 
 [tool.pyright]
 include = [
-  "lnbits"
+  "lnbits",
+  "tests",
+  "tools",
 ]
 exclude = [
   "lnbits/wallets/lnd_grpc_files",
@@ -77,7 +96,11 @@ exclude = [
 ]
 
 [tool.mypy]
-files = "lnbits"
+files = [
+  "lnbits",
+  "tests",
+  "tools",
+]
 exclude = [
   "^lnbits/wallets/lnd_grpc_files",
   "^lnbits/extensions",
@@ -105,6 +128,8 @@ module = [
   "pyln.client.*",
   "py_vapid.*",
   "pywebpush.*",
+  "fastapi_sso.sso.*",
+  "json5.*",
 ]
 ignore_missing_imports = "True"
 
@@ -130,53 +155,33 @@ extend-exclude = """(
 # Same as Black. + 10% rule of black
 line-length = 88
 
-# Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
-# (`I`) is for `isort`.
-select = ["E", "F", "I"]
+# Exclude generated files.
+extend-exclude = [
+    "lnbits/wallets/lnd_grpc_files"
+]
+
+[tool.ruff.lint]
+# Enable:
+# F - pyflakes
+# E - pycodestyle errors
+# W - pycodestyle warnings
+# I - isort
+# A - flake8-builtins
+# C - mccabe
+select = ["F", "E", "W", "I", "A", "C"]
 ignore = []
 
 # Allow autofix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
 unfixable = []
 
-# Exclude a variety of commonly ignored directories.
-exclude = [
-    "lnbits/static",
-    "lnbits/extensions",
-    "lnbits/wallets/lnd_grpc_files",
-    ".bzr",
-    ".direnv",
-    ".eggs",
-    ".git",
-    ".git-rewrite",
-    ".hg",
-    ".mypy_cache",
-    ".nox",
-    ".pants.d",
-    ".pytype",
-    ".ruff_cache",
-    ".svn",
-    ".tox",
-    ".venv",
-    "__pypackages__",
-    "_build",
-    "buck-out",
-    "build",
-    "dist",
-    "node_modules",
-    "venv",
-]
-
 # Allow unused variables when underscore-prefixed.
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
-# Assume Python
-# target-version = "py39"
-
 # Ignore unused imports in __init__.py files.
-[tool.ruff.extend-per-file-ignores]
+[tool.ruff.lint.extend-per-file-ignores]
 "__init__.py" = ["F401", "F403"]
 
-[tool.ruff.mccabe]
-# Unlike Flake8, default to a complexity level of 10.
-max-complexity = 10
+[tool.ruff.lint.mccabe]
+# TODO: Decrease this to 10.
+max-complexity = 16

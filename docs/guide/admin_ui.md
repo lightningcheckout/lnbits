@@ -33,7 +33,7 @@ There is also the possibility of posting the super user via webhook to another s
 Admin Users
 ===========
 environment variable: `LNBITS_ADMIN_USERS`, comma-separated list of user ids
-Admin Users can change settings in the admin ui as well, with the exception of funding source settings, because they require e server restart and could potentially make the server inaccessable. Also they have access to all the extension defined in `LNBITS_ADMIN_EXTENSIONS`.
+Admin Users can change settings in the admin ui as well, with the exception of funding source settings, because they require e server restart and could potentially make the server inaccessible. Also they have access to all the extension defined in `LNBITS_ADMIN_EXTENSIONS`.
 
 
 Allowed Users
@@ -60,7 +60,7 @@ $ poetry run lnbits
 ```
 You can now `cat` the Super User ID:
 ```
-$ cat .super_user
+$ cat data/.super_user
 123de4bfdddddbbeb48c8bc8382fe123
 ```
 You can access your super user account at `/wallet?usr=super_user_id`. You just have to append it to your normal LNbits web domain.

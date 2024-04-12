@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import json
+import time
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, TypedDict
@@ -11,8 +12,6 @@ from bolt11 import Bolt11
 from bolt11 import decode as bolt11_decode
 from cryptography.hazmat.primitives import serialization
 from fastapi import Depends, WebSocket
-from lnurl import LnurlErrorResponse
-from lnurl import decode as decode_lnurl
 from loguru import logger
 from py_vapid import Vapid
 from py_vapid.utils import b64urlencode
@@ -21,6 +20,8 @@ from lnbits.core.db import db
 from lnbits.db import Connection
 from lnbits.decorators import WalletTypeInfo, require_admin_key
 from lnbits.helpers import url_for
+from lnbits.lnurl import LnurlErrorResponse
+from lnbits.lnurl import decode as decode_lnurl
 from lnbits.settings import (
     EditableSettings,
     SuperSettings,
@@ -30,7 +31,12 @@ from lnbits.settings import (
 )
 from lnbits.utils.exchange_rates import fiat_amount_as_satoshis, satoshis_amount_as_fiat
 from lnbits.wallets import FAKE_WALLET, get_wallet_class, set_wallet_class
-from lnbits.wallets.base import PaymentResponse, PaymentStatus
+from lnbits.wallets.base import (
+    PaymentPendingStatus,
+    PaymentResponse,
+    PaymentStatus,
+    PaymentSuccessStatus,
+)
 
 from .crud import (
     check_internal,
@@ -41,6 +47,7 @@ from .crud import (
     create_wallet,
     delete_wallet_payment,
     get_account,
+    get_payments,
     get_standalone_payment,
     get_super_settings,
     get_total_balance,
@@ -52,7 +59,7 @@ from .crud import (
     update_super_user,
 )
 from .helpers import to_valid_user_id
-from .models import Payment, Wallet
+from .models import Payment, UserConfig, Wallet
 
 
 class PaymentFailure(Exception):
@@ -118,8 +125,9 @@ async def create_invoice(
     if not amount > 0:
         raise InvoiceFailure("Amountless invoices not supported.")
 
-    if await get_wallet(wallet_id, conn=conn) is None:
-        raise InvoiceFailure("Wallet does not exist.")
+    user_wallet = await get_wallet(wallet_id, conn=conn)
+    if not user_wallet:
+        raise InvoiceFailure(f"Could not fetch wallet '{wallet_id}'.")
 
     invoice_memo = None if description_hash else memo
 
@@ -129,6 +137,14 @@ async def create_invoice(
     amount_sat, extra = await calculate_fiat_amounts(
         amount, wallet_id, currency=currency, extra=extra, conn=conn
     )
+
+    if settings.is_wallet_max_balance_exceeded(
+        user_wallet.balance_msat / 1000 + amount_sat
+    ):
+        raise InvoiceFailure(
+            f"Wallet balance  cannot exceed "
+            f"{settings.lnbits_wallet_limit_max_balance} sats."
+        )
 
     ok, checking_id, payment_request, error_message = await wallet.create_invoice(
         amount=amount_sat,
@@ -178,22 +194,21 @@ async def pay_invoice(
     If the payment is still in flight, we hope that some other process
     will regularly check for the payment.
     """
-    invoice = bolt11_decode(payment_request)
+    try:
+        invoice = bolt11_decode(payment_request)
+    except Exception:
+        raise InvoiceFailure("Bolt11 decoding failed.")
 
     if not invoice.amount_msat or not invoice.amount_msat > 0:
-        raise ValueError("Amountless invoices not supported.")
+        raise InvoiceFailure("Amountless invoices not supported.")
     if max_sat and invoice.amount_msat > max_sat * 1000:
-        raise ValueError("Amount in invoice is too high.")
+        raise InvoiceFailure("Amount in invoice is too high.")
 
-    fee_reserve_msat = fee_reserve(invoice.amount_msat)
+    await check_wallet_limits(wallet_id, conn, invoice.amount_msat)
+
     async with db.reuse_conn(conn) if conn else db.connect() as conn:
         temp_id = invoice.payment_hash
         internal_id = f"internal_{invoice.payment_hash}"
-
-        if invoice.amount_msat == 0:
-            raise ValueError("Amountless invoices not supported.")
-        if max_sat and invoice.amount_msat > max_sat * 1000:
-            raise ValueError("Amount in invoice is too high.")
 
         _, extra = await calculate_fiat_amounts(
             invoice.amount_msat / 1000, wallet_id, extra=extra, conn=conn
@@ -228,6 +243,9 @@ async def pay_invoice(
         # (pending only)
         internal_checking_id = await check_internal(invoice.payment_hash, conn=conn)
         if internal_checking_id:
+            fee_reserve_total_msat = fee_reserve_total(
+                invoice.amount_msat, internal=True
+            )
             # perform additional checks on the internal payment
             # the payment hash is not enough to make sure that this is the same invoice
             internal_invoice = await get_standalone_payment(
@@ -244,19 +262,22 @@ async def pay_invoice(
             # create a new payment from this wallet
             new_payment = await create_payment(
                 checking_id=internal_id,
-                fee=0,
+                fee=0 + abs(fee_reserve_total_msat),
                 pending=False,
                 conn=conn,
                 **payment_kwargs,
             )
         else:
+            fee_reserve_total_msat = fee_reserve_total(
+                invoice.amount_msat, internal=False
+            )
             logger.debug(f"creating temporary payment with id {temp_id}")
             # create a temporary payment here so we can check if
             # the balance is enough in the next step
             try:
                 new_payment = await create_payment(
                     checking_id=temp_id,
-                    fee=-fee_reserve_msat,
+                    fee=-abs(fee_reserve_total_msat),
                     conn=conn,
                     **payment_kwargs,
                 )
@@ -270,14 +291,18 @@ async def pay_invoice(
         assert wallet, "Wallet for balancecheck could not be fetched"
         if wallet.balance_msat < 0:
             logger.debug("balance is too low, deleting temporary payment")
-            if not internal_checking_id and wallet.balance_msat > -fee_reserve_msat:
+            if (
+                not internal_checking_id
+                and wallet.balance_msat > -fee_reserve_total_msat
+            ):
                 raise PaymentFailure(
-                    f"You must reserve at least ({round(fee_reserve_msat/1000)} sat) to"
-                    " cover potential routing fees."
+                    f"You must reserve at least ({round(fee_reserve_total_msat/1000)}"
+                    "  sat) to cover potential routing fees."
                 )
             raise PermissionError("Insufficient balance.")
 
     if internal_checking_id:
+        service_fee_msat = service_fee(invoice.amount_msat, internal=True)
         logger.debug(f"marking temporary payment as not pending {internal_checking_id}")
         # mark the invoice from the other side as not pending anymore
         # so the other side only has access to his new money when we are sure
@@ -294,6 +319,8 @@ async def pay_invoice(
         logger.debug(f"enqueuing internal invoice {internal_checking_id}")
         await internal_invoice_queue.put(internal_checking_id)
     else:
+        fee_reserve_msat = fee_reserve(invoice.amount_msat, internal=False)
+        service_fee_msat = service_fee(invoice.amount_msat, internal=False)
         logger.debug(f"backend: sending payment {temp_id}")
         # actually pay the external invoice
         WALLET = get_wallet_class()
@@ -315,7 +342,10 @@ async def pay_invoice(
                 await update_payment_details(
                     checking_id=temp_id,
                     pending=payment.ok is not True,
-                    fee=payment.fee_msat,
+                    fee=-(
+                        abs(payment.fee_msat if payment.fee_msat else 0)
+                        + abs(service_fee_msat)
+                    ),
                     preimage=payment.preimage,
                     new_checking_id=payment.checking_id,
                     conn=conn,
@@ -343,7 +373,71 @@ async def pay_invoice(
                 f" database: {temp_id}"
             )
 
+    # credit service fee wallet
+    if settings.lnbits_service_fee_wallet and service_fee_msat:
+        new_payment = await create_payment(
+            wallet_id=settings.lnbits_service_fee_wallet,
+            fee=0,
+            amount=abs(service_fee_msat),
+            memo="Service fee",
+            checking_id="service_fee" + temp_id,
+            payment_request=payment_request,
+            payment_hash=invoice.payment_hash,
+            pending=False,
+        )
     return invoice.payment_hash
+
+
+async def check_wallet_limits(wallet_id, conn, amount_msat):
+    await check_time_limit_between_transactions(conn, wallet_id)
+    await check_wallet_daily_withdraw_limit(conn, wallet_id, amount_msat)
+
+
+async def check_time_limit_between_transactions(conn, wallet_id):
+    limit = settings.lnbits_wallet_limit_secs_between_trans
+    if not limit or limit <= 0:
+        return
+
+    payments = await get_payments(
+        since=int(time.time()) - limit,
+        wallet_id=wallet_id,
+        limit=1,
+        conn=conn,
+    )
+
+    if len(payments) == 0:
+        return
+
+    raise ValueError(
+        f"The time limit of {limit} seconds between payments has been reached."
+    )
+
+
+async def check_wallet_daily_withdraw_limit(conn, wallet_id, amount_msat):
+    limit = settings.lnbits_wallet_limit_daily_max_withdraw
+    if not limit or limit <= 0:
+        return
+
+    payments = await get_payments(
+        since=int(time.time()) - 60 * 60 * 24,
+        outgoing=True,
+        wallet_id=wallet_id,
+        limit=1,
+        conn=conn,
+    )
+    if len(payments) == 0:
+        return
+
+    total = 0
+    for pay in payments:
+        total += pay.amount
+    total = total - amount_msat
+    if limit * 1000 + total < 0:
+        raise ValueError(
+            "Daily withdrawal limit of "
+            + str(settings.lnbits_wallet_limit_daily_max_withdraw)
+            + " sats reached."
+        )
 
 
 async def redeem_lnurl_withdraw(
@@ -359,7 +453,8 @@ async def redeem_lnurl_withdraw(
 
     res = {}
 
-    async with httpx.AsyncClient() as client:
+    headers = {"User-Agent": settings.user_agent}
+    async with httpx.AsyncClient(headers=headers) as client:
         lnurl = decode_lnurl(lnurl_request)
         r = await client.get(str(lnurl))
         res = r.json()
@@ -393,7 +488,8 @@ async def redeem_lnurl_withdraw(
     except Exception:
         pass
 
-    async with httpx.AsyncClient() as client:
+    headers = {"User-Agent": settings.user_agent}
+    async with httpx.AsyncClient(headers=headers) as client:
         try:
             await client.get(res["callback"], params=params)
         except Exception:
@@ -456,7 +552,8 @@ async def perform_lnurlauth(
 
     sig = key.sign_digest_deterministic(k1, sigencode=encode_strict_der)
 
-    async with httpx.AsyncClient() as client:
+    headers = {"User-Agent": settings.user_agent}
+    async with httpx.AsyncClient(headers=headers) as client:
         assert key.verifying_key, "LNURLauth verifying_key does not exist"
         r = await client.get(
             callback,
@@ -485,10 +582,10 @@ async def check_transaction_status(
         wallet_id, payment_hash, conn=conn
     )
     if not payment:
-        return PaymentStatus(None)
+        return PaymentPendingStatus()
     if not payment.pending:
         # note: before, we still checked the status of the payment again
-        return PaymentStatus(True, fee_msat=payment.fee)
+        return PaymentSuccessStatus(fee_msat=payment.fee)
 
     status: PaymentStatus = await payment.check_status()
     return status
@@ -496,10 +593,31 @@ async def check_transaction_status(
 
 # WARN: this same value must be used for balance check and passed to
 # WALLET.pay_invoice(), it may cause a vulnerability if the values differ
-def fee_reserve(amount_msat: int) -> int:
+def fee_reserve(amount_msat: int, internal: bool = False) -> int:
+    if internal:
+        return 0
     reserve_min = settings.lnbits_reserve_fee_min
     reserve_percent = settings.lnbits_reserve_fee_percent
     return max(int(reserve_min), int(amount_msat * reserve_percent / 100.0))
+
+
+def service_fee(amount_msat: int, internal: bool = False) -> int:
+    service_fee_percent = settings.lnbits_service_fee
+    fee_max = settings.lnbits_service_fee_max * 1000
+    if settings.lnbits_service_fee_wallet:
+        if internal and settings.lnbits_service_fee_ignore_internal:
+            return 0
+        fee_percentage = int(amount_msat / 100 * service_fee_percent)
+        if fee_max > 0 and fee_percentage > fee_max:
+            return fee_max
+        else:
+            return fee_percentage
+    else:
+        return 0
+
+
+def fee_reserve_total(amount_msat: int, internal: bool = False) -> int:
+    return fee_reserve(amount_msat, internal) + service_fee(amount_msat, internal)
 
 
 async def send_payment_notification(wallet: Wallet, payment: Payment):
@@ -561,6 +679,10 @@ async def check_admin_settings():
         ):
             send_admin_user_to_saas()
 
+        account = await get_account(settings.super_user)
+        if account and account.config and account.config.provider == "env":
+            settings.first_install = True
+
         logger.success(
             "✔️ Admin UI is enabled. run `poetry run lnbits-cli superuser` "
             "to get the superuser."
@@ -592,11 +714,14 @@ async def check_webpush_settings():
 
 def update_cached_settings(sets_dict: dict):
     for key, value in sets_dict.items():
-        if key not in readonly_variables:
-            try:
-                setattr(settings, key, value)
-            except Exception:
-                logger.warning(f"Failed overriding setting: {key}, value: {value}")
+        if key in readonly_variables:
+            continue
+        if key not in settings.dict().keys():
+            continue
+        try:
+            setattr(settings, key, value)
+        except Exception:
+            logger.warning(f"Failed overriding setting: {key}, value: {value}")
     if "super_user" in sets_dict:
         setattr(settings, "super_user", sets_dict["super_user"])
 
@@ -606,7 +731,9 @@ async def init_admin_settings(super_user: Optional[str] = None) -> SuperSettings
     if super_user:
         account = await get_account(super_user)
     if not account:
-        account = await create_account(user_id=super_user)
+        account = await create_account(
+            user_id=super_user, user_config=UserConfig(provider="env")
+        )
     if not account.wallets or len(account.wallets) == 0:
         await create_wallet(user_id=account.id)
 

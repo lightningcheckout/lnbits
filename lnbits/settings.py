@@ -4,8 +4,11 @@ import importlib
 import importlib.metadata
 import inspect
 import json
+from enum import Enum
+from hashlib import sha256
 from os import path
 from sqlite3 import Row
+from time import time
 from typing import Any, List, Optional
 
 import httpx
@@ -46,6 +49,7 @@ class UsersSettings(LNbitsSettings):
 
 class ExtensionsSettings(LNbitsSettings):
     lnbits_admin_extensions: List[str] = Field(default=[])
+    lnbits_extensions_deactivate_all: bool = Field(default=False)
     lnbits_extensions_manifests: List[str] = Field(
         default=[
             "https://raw.githubusercontent.com/lnbits/lnbits-extensions/main/extensions.json"
@@ -66,6 +70,16 @@ class InstalledExtensionsSettings(LNbitsSettings):
     lnbits_upgraded_extensions: List[str] = Field(default=[])
     # list of redirects that extensions want to perform
     lnbits_extensions_redirects: List[Any] = Field(default=[])
+
+    def extension_upgrade_path(self, ext_id: str) -> Optional[str]:
+        return next(
+            (e for e in self.lnbits_upgraded_extensions if e.endswith(f"/{ext_id}")),
+            None,
+        )
+
+    def extension_upgrade_hash(self, ext_id: str) -> Optional[str]:
+        path = settings.extension_upgrade_path(ext_id)
+        return path.split("/")[0] if path else None
 
 
 class ThemesSettings(LNbitsSettings):
@@ -101,6 +115,9 @@ class OpsSettings(LNbitsSettings):
     lnbits_reserve_fee_min: int = Field(default=2000)
     lnbits_reserve_fee_percent: float = Field(default=1.0)
     lnbits_service_fee: float = Field(default=0)
+    lnbits_service_fee_ignore_internal: bool = Field(default=True)
+    lnbits_service_fee_max: int = Field(default=0)
+    lnbits_service_fee_wallet: str = Field(default=None)
     lnbits_hide_api: bool = Field(default=False)
     lnbits_denomination: str = Field(default="sats")
 
@@ -113,6 +130,9 @@ class SecuritySettings(LNbitsSettings):
     lnbits_notifications: bool = Field(default=False)
     lnbits_killswitch: bool = Field(default=False)
     lnbits_killswitch_interval: int = Field(default=60)
+    lnbits_wallet_limit_max_balance: int = Field(default=0)
+    lnbits_wallet_limit_daily_max_withdraw: int = Field(default=0)
+    lnbits_wallet_limit_secs_between_trans: int = Field(default=0)
     lnbits_watchdog: bool = Field(default=False)
     lnbits_watchdog_interval: int = Field(default=60)
     lnbits_watchdog_delta: int = Field(default=1_000_000)
@@ -121,6 +141,13 @@ class SecuritySettings(LNbitsSettings):
             "https://raw.githubusercontent.com/lnbits/lnbits-status/main/manifest.json"
         )
     )
+
+    def is_wallet_max_balance_exceeded(self, amount):
+        return (
+            self.lnbits_wallet_limit_max_balance
+            and self.lnbits_wallet_limit_max_balance > 0
+            and amount > self.lnbits_wallet_limit_max_balance
+        )
 
 
 class FakeWalletFundingSource(LNbitsSettings):
@@ -159,6 +186,7 @@ class LndRestFundingSource(LNbitsSettings):
     lnd_rest_cert: Optional[str] = Field(default=None)
     lnd_rest_macaroon: Optional[str] = Field(default=None)
     lnd_rest_macaroon_encrypted: Optional[str] = Field(default=None)
+    lnd_rest_route_hints: bool = Field(default=True)
     lnd_cert: Optional[str] = Field(default=None)
     lnd_admin_macaroon: Optional[str] = Field(default=None)
     lnd_invoice_macaroon: Optional[str] = Field(default=None)
@@ -183,6 +211,16 @@ class LnPayFundingSource(LNbitsSettings):
     lnpay_admin_key: Optional[str] = Field(default=None)
 
 
+class ZBDFundingSource(LNbitsSettings):
+    zbd_api_endpoint: Optional[str] = Field(default="https://api.zebedee.io/v0/")
+    zbd_api_key: Optional[str] = Field(default=None)
+
+
+class AlbyFundingSource(LNbitsSettings):
+    alby_api_endpoint: Optional[str] = Field(default="https://api.getalby.com/")
+    alby_access_token: Optional[str] = Field(default=None)
+
+
 class OpenNodeFundingSource(LNbitsSettings):
     opennode_api_endpoint: Optional[str] = Field(default=None)
     opennode_key: Optional[str] = Field(default=None)
@@ -202,14 +240,6 @@ class LnTipsFundingSource(LNbitsSettings):
     lntips_invoice_key: Optional[str] = Field(default=None)
 
 
-# todo: must be extracted
-class BoltzExtensionSettings(LNbitsSettings):
-    boltz_network: str = Field(default="main")
-    boltz_url: str = Field(default="https://boltz.exchange/api")
-    boltz_mempool_space_url: str = Field(default="https://mempool.space")
-    boltz_mempool_space_url_ws: str = Field(default="wss://mempool.space")
-
-
 class LightningSettings(LNbitsSettings):
     lightning_invoice_expiry: int = Field(default=3600)
 
@@ -224,6 +254,8 @@ class FundingSourcesSettings(
     LndRestFundingSource,
     LndGrpcFundingSource,
     LnPayFundingSource,
+    AlbyFundingSource,
+    ZBDFundingSource,
     OpenNodeFundingSource,
     SparkFundingSource,
     LnTipsFundingSource,
@@ -246,6 +278,44 @@ class NodeUISettings(LNbitsSettings):
     lnbits_node_ui_transactions: bool = Field(default=False)
 
 
+class AuthMethods(Enum):
+    user_id_only = "user-id-only"
+    username_and_password = "username-password"
+    google_auth = "google-auth"
+    github_auth = "github-auth"
+    keycloak_auth = "keycloak-auth"
+
+
+class AuthSettings(LNbitsSettings):
+    auth_token_expire_minutes: int = Field(default=525600)
+    auth_all_methods = [a.value for a in AuthMethods]
+    auth_allowed_methods: List[str] = Field(
+        default=[
+            AuthMethods.user_id_only.value,
+            AuthMethods.username_and_password.value,
+        ]
+    )
+
+    def is_auth_method_allowed(self, method: AuthMethods):
+        return method.value in self.auth_allowed_methods
+
+
+class GoogleAuthSettings(LNbitsSettings):
+    google_client_id: str = Field(default="")
+    google_client_secret: str = Field(default="")
+
+
+class GitHubAuthSettings(LNbitsSettings):
+    github_client_id: str = Field(default="")
+    github_client_secret: str = Field(default="")
+
+
+class KeycloakAuthSettings(LNbitsSettings):
+    keycloak_discovery_url: str = Field(default="")
+    keycloak_client_id: str = Field(default="")
+    keycloak_client_secret: str = Field(default="")
+
+
 class EditableSettings(
     UsersSettings,
     ExtensionsSettings,
@@ -253,10 +323,13 @@ class EditableSettings(
     OpsSettings,
     SecuritySettings,
     FundingSourcesSettings,
-    BoltzExtensionSettings,
     LightningSettings,
     WebPushSettings,
     NodeUISettings,
+    AuthSettings,
+    GoogleAuthSettings,
+    GitHubAuthSettings,
+    KeycloakAuthSettings,
 ):
     @validator(
         "lnbits_admin_users",
@@ -290,6 +363,7 @@ class UpdateSettings(EditableSettings):
 
 class EnvSettings(LNbitsSettings):
     debug: bool = Field(default=False)
+    debug_database: bool = Field(default=False)
     bundle_assets: bool = Field(default=True)
     host: str = Field(default="127.0.0.1")
     port: int = Field(default=5000)
@@ -298,10 +372,14 @@ class EnvSettings(LNbitsSettings):
     lnbits_path: str = Field(default=".")
     lnbits_extensions_path: str = Field(default="lnbits")
     super_user: str = Field(default="")
+    auth_secret_key: str = Field(default="")
     version: str = Field(default="0.0.0")
+    user_agent: str = Field(default="")
     enable_log_to_file: bool = Field(default=True)
     log_rotation: str = Field(default="100 MB")
     log_retention: str = Field(default="3 months")
+    server_startup_time: int = Field(default=time())
+    cleanup_wallets_days: int = Field(default=90)
 
     @property
     def has_default_extension_path(self) -> bool:
@@ -331,6 +409,8 @@ class SuperUserSettings(LNbitsSettings):
             "LndWallet",
             "LnTipsWallet",
             "LNPayWallet",
+            "AlbyWallet",
+            "ZBDWallet",
             "LNbitsWallet",
             "OpenNodeWallet",
         ]
@@ -343,6 +423,7 @@ class TransientSettings(InstalledExtensionsSettings):
     #  - are not read from a file or from the `settings` table
     #  - are not persisted in the `settings` table when the settings are updated
     #  - are cleared on server restart
+    first_install: bool = Field(default=False)
 
     @classmethod
     def readonly_fields(cls):
@@ -382,6 +463,14 @@ class Settings(EditableSettings, ReadOnlySettings, TransientSettings, BaseSettin
         env_file_encoding = "utf-8"
         case_sensitive = False
         json_loads = list_parse_fallback
+
+    def is_user_allowed(self, user_id: str):
+        return (
+            len(self.lnbits_allowed_users) == 0
+            or user_id in self.lnbits_allowed_users
+            or user_id in self.lnbits_admin_users
+            or user_id == self.super_user
+        )
 
 
 class SuperSettings(EditableSettings):
@@ -431,6 +520,12 @@ settings = Settings()
 settings.lnbits_path = str(path.dirname(path.realpath(__file__)))
 
 settings.version = importlib.metadata.version("lnbits")
+settings.auth_secret_key = (
+    settings.auth_secret_key or sha256(settings.super_user.encode("utf-8")).hexdigest()
+)
+
+if not settings.user_agent:
+    settings.user_agent = f"LNbits/{settings.version}"
 
 # printing environment variable for debugging
 if not settings.lnbits_admin_ui:

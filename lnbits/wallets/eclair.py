@@ -13,6 +13,7 @@ from lnbits.settings import settings
 
 from .base import (
     InvoiceResponse,
+    PaymentPendingStatus,
     PaymentResponse,
     PaymentStatus,
     StatusResponse,
@@ -30,18 +31,22 @@ class UnknownError(Exception):
 
 class EclairWallet(Wallet):
     def __init__(self):
-        url = settings.eclair_url
-        passw = settings.eclair_pass
-        if not url or not passw:
-            raise Exception("cannot initialize eclair")
+        if not settings.eclair_url:
+            raise ValueError("cannot initialize EclairWallet: missing eclair_url")
+        if not settings.eclair_pass:
+            raise ValueError("cannot initialize EclairWallet: missing eclair_pass")
 
-        self.url = url[:-1] if url.endswith("/") else url
+        self.url = self.normalize_endpoint(settings.eclair_url)
         self.ws_url = f"ws://{urllib.parse.urlsplit(self.url).netloc}/ws"
 
-        encodedAuth = base64.b64encode(f":{passw}".encode())
+        password = settings.eclair_pass
+        encodedAuth = base64.b64encode(f":{password}".encode())
         auth = str(encodedAuth, "utf-8")
-        self.auth = {"Authorization": f"Basic {auth}"}
-        self.client = httpx.AsyncClient(base_url=self.url, headers=self.auth)
+        self.headers = {
+            "Authorization": f"Basic {auth}",
+            "User-Agent": settings.user_agent,
+        }
+        self.client = httpx.AsyncClient(base_url=self.url, headers=self.headers)
 
     async def cleanup(self):
         try:
@@ -176,7 +181,7 @@ class EclairWallet(Wallet):
             }
             return PaymentStatus(statuses.get(data["status"]["type"]))
         except Exception:
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
 
     async def get_payment_status(self, checking_id: str) -> PaymentStatus:
         try:
@@ -207,14 +212,14 @@ class EclairWallet(Wallet):
                 statuses.get(data["status"]["type"]), fee_msat, preimage
             )
         except Exception:
-            return PaymentStatus(None)
+            return PaymentPendingStatus()
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
         while True:
             try:
                 async with connect(
                     self.ws_url,
-                    extra_headers=[("Authorization", self.auth["Authorization"])],
+                    extra_headers=[("Authorization", self.headers["Authorization"])],
                 ) as ws:
                     while True:
                         message = await ws.recv()

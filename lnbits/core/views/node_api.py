@@ -49,12 +49,20 @@ def check_public():
         )
 
 
-node_router = APIRouter(prefix="/node/api/v1", dependencies=[Depends(check_admin)])
+node_router = APIRouter(
+    tags=["Node Managment"],
+    prefix="/node/api/v1",
+    dependencies=[Depends(check_admin)],
+)
 super_node_router = APIRouter(
-    prefix="/node/api/v1", dependencies=[Depends(check_super_user)]
+    tags=["Node Managment"],
+    prefix="/node/api/v1",
+    dependencies=[Depends(check_super_user)],
 )
 public_node_router = APIRouter(
-    prefix="/node/public/api/v1", dependencies=[Depends(check_public)]
+    tags=["Node Managment"],
+    prefix="/node/public/api/v1",
+    dependencies=[Depends(check_public)],
 )
 
 
@@ -108,9 +116,11 @@ async def api_delete_channel(
 ) -> Optional[List[NodeChannel]]:
     return await node.close_channel(
         short_id,
-        ChannelPoint(funding_txid=funding_txid, output_index=output_index)
-        if funding_txid is not None and output_index is not None
-        else None,
+        (
+            ChannelPoint(funding_txid=funding_txid, output_index=output_index)
+            if funding_txid is not None and output_index is not None
+            else None
+        ),
         force,
     )
 
@@ -179,7 +189,8 @@ class NodeRank(BaseModel):
 )
 async def api_get_1ml_stats(node: Node = Depends(require_node)) -> Optional[NodeRank]:
     node_id = await node.get_id()
-    async with httpx.AsyncClient() as client:
+    headers = {"User-Agent": settings.user_agent}
+    async with httpx.AsyncClient(headers=headers) as client:
         r = await client.get(url=f"https://1ml.com/node/{node_id}/json", timeout=15)
         try:
             r.raise_for_status()

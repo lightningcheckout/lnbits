@@ -13,21 +13,29 @@ By default, LNbits will use SQLite as its database. You can also use PostgreSQL 
 ## Option 1 (recommended): poetry
 
 Mininum poetry version has is ^1.2, but it is recommended to use latest poetry. (including OSX)
+Make sure you have Python 3.9 or 3.10 installed.
+
+### install python on ubuntu
+```sh
+# for making sure python 3.9 is installed, skip if installed. To check your installed version: python3 --version
+sudo apt update
+sudo apt install software-properties-common
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt install python3.9 python3.9-distutils
+```
+
+### install poetry
+```sh
+curl -sSL https://install.python-poetry.org | python3 -
+# Once the above poetry install is completed, use the installation path printed to terminal and replace in the following command
+export PATH="/home/user/.local/bin:$PATH"
+```
 
 ```sh
 git clone https://github.com/lnbits/lnbits.git
 cd lnbits
 git checkout main
 
-# for making sure python 3.9 is installed, skip if installed. To check your installed version: python3 --version
-sudo apt update
-sudo apt install software-properties-common
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt install python3.9 python3.9-distutils
-
-curl -sSL https://install.python-poetry.org | python3 -
-# Once the above poetry install is completed, use the installation path printed to terminal and replace in the following command
-export PATH="/home/user/.local/bin:$PATH"
 # Next command, you can exchange with python3.10 or newer versions.
 # Identify your version with python3 --version and specify in the next line
 # command is only needed when your default python is not ^3.9 or ^3.10
@@ -61,44 +69,59 @@ poetry install --only main
 
 ## Option 2: Nix
 
-> note: currently not supported while we make some architectural changes on the path to leave beta
-
 ```sh
+# Install nix. If you have installed via another manager, remove and use this install (from https://nixos.org/download)
+sh <(curl -L https://nixos.org/nix/install) --daemon
+
+# Enable nix-command and flakes experimental features for nix:
+echo 'experimental-features = nix-command flakes' >> /etc/nix/nix.conf
+
+# Add cachix for cached binaries
+nix-env -iA cachix -f https://cachix.org/api/v1/install
+cachix use lnbits
+
+# Clone and build LNbits
 git clone https://github.com/lnbits/lnbits.git
 cd lnbits
-# Modern debian distros usually include Nix, however you can install with:
-# 'sh <(curl -L https://nixos.org/nix/install) --daemon', or use setup here https://nixos.org/download.html#nix-verify-installation
+nix build
 
-nix build .#lnbits
 mkdir data
-
 ```
 
 #### Running the server
 
 ```sh
-# .env variables are currently passed when running
-LNBITS_DATA_FOLDER=data LNBITS_BACKEND_WALLET_CLASS=LNbitsWallet LNBITS_ENDPOINT=https://legend.lnbits.com LNBITS_KEY=7b1a78d6c78f48b09a202f2dcb2d22eb ./result/bin/lnbits --port 9000
+nix run
 ```
 
+Ideally you would set the environment via the `.env` file,
+but you can also set the env variables or pass command line arguments:
+
+``` sh
+# .env variables are currently passed when running, but LNbits can be managed with the admin UI.
+LNBITS_ADMIN_UI=true ./result/bin/lnbits --port 9000
+
+# Once you have created a user, you can set as the super_user
+SUPER_USER=be54db7f245346c8833eaa430e1e0405 LNBITS_ADMIN_UI=true ./result/bin/lnbits --port 9000
+```
 
 ## Option 3: Docker
 
 use latest version from docker hub
 ```sh
-docker pull lnbitsdocker/lnbits-legend
+docker pull lnbits/lnbits
 wget https://raw.githubusercontent.com/lnbits/lnbits/main/.env.example -O .env
 mkdir data
-docker run --detach --publish 5000:5000 --name lnbits --volume ${PWD}/.env:/app/.env --volume ${PWD}/data/:/app/data lnbitsdocker/lnbits-legend
+docker run --detach --publish 5000:5000 --name lnbits --volume ${PWD}/.env:/app/.env --volume ${PWD}/data/:/app/data lnbits/lnbits
 ```
 build the image yourself
 ```sh
 git clone https://github.com/lnbits/lnbits.git
 cd lnbits
-docker build -t lnbitsdocker/lnbits-legend .
+docker build -t lnbits/lnbits .
 cp .env.example .env
 mkdir data
-docker run --detach --publish 5000:5000 --name lnbits --volume ${PWD}/.env:/app/.env --volume ${PWD}/data/:/app/data lnbitsdocker/lnbits-legend
+docker run --detach --publish 5000:5000 --name lnbits --volume ${PWD}/.env:/app/.env --volume ${PWD}/data/:/app/data lnbits/lnbits
 ```
 
 ## Option 4: Fly.io

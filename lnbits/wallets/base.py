@@ -18,6 +18,18 @@ class InvoiceResponse(NamedTuple):
     payment_request: Optional[str] = None
     error_message: Optional[str] = None
 
+    @property
+    def success(self) -> bool:
+        return self.ok is True
+
+    @property
+    def pending(self) -> bool:
+        return self.ok is None
+
+    @property
+    def failed(self) -> bool:
+        return self.ok is False
+
 
 class PaymentResponse(NamedTuple):
     # when ok is None it means we don't know if this succeeded
@@ -27,11 +39,27 @@ class PaymentResponse(NamedTuple):
     preimage: Optional[str] = None
     error_message: Optional[str] = None
 
+    @property
+    def success(self) -> bool:
+        return self.ok is True
+
+    @property
+    def pending(self) -> bool:
+        return self.ok is None
+
+    @property
+    def failed(self) -> bool:
+        return self.ok is False
+
 
 class PaymentStatus(NamedTuple):
     paid: Optional[bool] = None
     fee_msat: Optional[int] = None
     preimage: Optional[str] = None
+
+    @property
+    def success(self) -> bool:
+        return self.paid is True
 
     @property
     def pending(self) -> bool:
@@ -50,6 +78,18 @@ class PaymentStatus(NamedTuple):
             return "still pending"
         else:
             return "unknown (should never happen)"
+
+
+class PaymentSuccessStatus(PaymentStatus):
+    paid = True
+
+
+class PaymentFailedStatus(PaymentStatus):
+    paid = False
+
+
+class PaymentPendingStatus(PaymentStatus):
+    paid = None
 
 
 class Wallet(ABC):
@@ -94,6 +134,14 @@ class Wallet(ABC):
     @abstractmethod
     def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
         pass
+
+    def normalize_endpoint(self, endpoint: str, add_proto=True) -> str:
+        endpoint = endpoint[:-1] if endpoint.endswith("/") else endpoint
+        if add_proto:
+            endpoint = (
+                f"https://{endpoint}" if not endpoint.startswith("http") else endpoint
+            )
+        return endpoint
 
 
 class Unsupported(Exception):
