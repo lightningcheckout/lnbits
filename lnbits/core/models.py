@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import hashlib
 import hmac
@@ -6,7 +8,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from sqlite3 import Row
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Optional
 
 from ecdsa import SECP256k1, SigningKey
 from fastapi import Query
@@ -17,7 +19,7 @@ from lnbits.db import Connection, FilterModel, FromRowModel
 from lnbits.helpers import url_for
 from lnbits.lnurl import encode as lnurl_encode
 from lnbits.settings import settings
-from lnbits.wallets import get_wallet_class
+from lnbits.wallets import get_funding_source
 from lnbits.wallets.base import PaymentPendingStatus, PaymentStatus
 
 
@@ -62,13 +64,13 @@ class Wallet(BaseWallet):
             linking_key, curve=SECP256k1, hashfunc=hashlib.sha256
         )
 
-    async def get_payment(self, payment_hash: str) -> Optional["Payment"]:
+    async def get_payment(self, payment_hash: str) -> Optional[Payment]:
         from .crud import get_standalone_payment
 
         return await get_standalone_payment(payment_hash)
 
 
-class WalletType(Enum):
+class KeyType(Enum):
     admin = 0
     invoice = 1
     invalid = 2
@@ -80,7 +82,7 @@ class WalletType(Enum):
 
 @dataclass
 class WalletTypeInfo:
-    wallet_type: WalletType
+    key_type: KeyType
     wallet: Wallet
 
 
@@ -97,12 +99,43 @@ class UserConfig(BaseModel):
     provider: Optional[str] = "lnbits"  # auth provider
 
 
+class Account(FromRowModel):
+    id: str
+    is_super_user: Optional[bool] = False
+    is_admin: Optional[bool] = False
+    username: Optional[str] = None
+    email: Optional[str] = None
+    balance_msat: Optional[int] = 0
+    transaction_count: Optional[int] = 0
+    wallet_count: Optional[int] = 0
+    last_payment: Optional[datetime.datetime] = None
+
+
+class AccountFilters(FilterModel):
+    __search_fields__ = ["id", "email", "username"]
+    __sort_fields__ = [
+        "balance_msat",
+        "email",
+        "username",
+        "transaction_count",
+        "wallet_count",
+        "last_payment",
+    ]
+
+    id: str
+    last_payment: Optional[datetime.datetime] = None
+    transaction_count: Optional[int] = None
+    wallet_count: Optional[int] = None
+    username: Optional[str] = None
+    email: Optional[str] = None
+
+
 class User(BaseModel):
     id: str
     email: Optional[str] = None
     username: Optional[str] = None
-    extensions: List[str] = []
-    wallets: List[Wallet] = []
+    extensions: list[str] = []
+    wallets: list[Wallet] = []
     admin: bool = False
     super_user: bool = False
     has_password: bool = False
@@ -111,10 +144,10 @@ class User(BaseModel):
     updated_at: Optional[int] = None
 
     @property
-    def wallet_ids(self) -> List[str]:
+    def wallet_ids(self) -> list[str]:
         return [wallet.id for wallet in self.wallets]
 
-    def get_wallet(self, wallet_id: str) -> Optional["Wallet"]:
+    def get_wallet(self, wallet_id: str) -> Optional[Wallet]:
         w = [wallet for wallet in self.wallets if wallet.id == wallet_id]
         return w[0] if w else None
 
@@ -177,7 +210,7 @@ class Payment(FromRowModel):
     preimage: str
     payment_hash: str
     expiry: Optional[float]
-    extra: Dict = {}
+    extra: dict = {}
     wallet_id: str
     webhook: Optional[str]
     webhook_status: Optional[int]
@@ -265,11 +298,11 @@ class Payment(FromRowModel):
             f"pending payment {self.checking_id}"
         )
 
-        WALLET = get_wallet_class()
+        funding_source = get_funding_source()
         if self.is_out:
-            status = await WALLET.get_payment_status(self.checking_id)
+            status = await funding_source.get_payment_status(self.checking_id)
         else:
-            status = await WALLET.get_invoice_status(self.checking_id)
+            status = await funding_source.get_invoice_status(self.checking_id)
 
         logger.debug(f"Status: {status}")
 
@@ -318,7 +351,7 @@ class PaymentFilters(FilterModel):
     preimage: str
     payment_hash: str
     expiry: Optional[datetime.datetime]
-    extra: Dict = {}
+    extra: dict = {}
     wallet_id: str
     webhook: Optional[str]
     webhook_status: Optional[int]
@@ -329,16 +362,6 @@ class PaymentHistoryPoint(BaseModel):
     income: int
     spending: int
     balance: int
-
-
-class BalanceCheck(BaseModel):
-    wallet: str
-    service: str
-    url: str
-
-    @classmethod
-    def from_row(cls, row: Row):
-        return cls(wallet=row["wallet"], service=row["service"], url=row["url"])
 
 
 def _do_nothing(*_):
@@ -394,11 +417,10 @@ class CreateInvoice(BaseModel):
     description_hash: Optional[str] = None
     unhashed_description: Optional[str] = None
     expiry: Optional[int] = None
-    lnurl_callback: Optional[str] = None
-    lnurl_balance_check: Optional[str] = None
     extra: Optional[dict] = None
     webhook: Optional[str] = None
     bolt11: Optional[str] = None
+    lnurl_callback: Optional[str] = None
 
 
 class CreateTopup(BaseModel):
@@ -424,3 +446,17 @@ class WebPushSubscription(BaseModel):
     data: str
     host: str
     timestamp: str
+
+
+class BalanceDelta(BaseModel):
+    lnbits_balance_msats: int
+    node_balance_msats: int
+
+    @property
+    def delta_msats(self):
+        return self.node_balance_msats - self.lnbits_balance_msats
+
+
+class SimpleStatus(BaseModel):
+    success: bool
+    message: str

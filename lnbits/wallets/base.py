@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, AsyncGenerator, Coroutine, NamedTuple, Optional, Type
+from typing import TYPE_CHECKING, AsyncGenerator, Coroutine, NamedTuple, Optional
 
 if TYPE_CHECKING:
     from lnbits.nodes.base import Node
@@ -70,14 +70,11 @@ class PaymentStatus(NamedTuple):
         return self.paid is False
 
     def __str__(self) -> str:
-        if self.paid is True:
-            return "settled"
-        elif self.paid is False:
+        if self.success:
+            return "success"
+        if self.failed:
             return "failed"
-        elif self.paid is None:
-            return "still pending"
-        else:
-            return "unknown (should never happen)"
+        return "pending"
 
 
 class PaymentSuccessStatus(PaymentStatus):
@@ -93,10 +90,12 @@ class PaymentPendingStatus(PaymentStatus):
 
 
 class Wallet(ABC):
+
+    __node_cls__: Optional[type[Node]] = None
+
+    @abstractmethod
     async def cleanup(self):
         pass
-
-    __node_cls__: Optional[Type[Node]] = None
 
     @abstractmethod
     def status(self) -> Coroutine[None, None, StatusResponse]:
@@ -138,11 +137,13 @@ class Wallet(ABC):
     def normalize_endpoint(self, endpoint: str, add_proto=True) -> str:
         endpoint = endpoint[:-1] if endpoint.endswith("/") else endpoint
         if add_proto:
+            if endpoint.startswith("ws://") or endpoint.startswith("wss://"):
+                return endpoint
             endpoint = (
                 f"https://{endpoint}" if not endpoint.startswith("http") else endpoint
             )
         return endpoint
 
 
-class Unsupported(Exception):
+class UnsupportedError(Exception):
     pass

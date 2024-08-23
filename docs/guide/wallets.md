@@ -4,14 +4,11 @@ title: Backend wallets
 nav_order: 3
 ---
 
-
-Backend wallets
-===============
+# Backend wallets
 
 LNbits can run on top of many Lightning Network funding sources with more being added regularly.
 
 A backend wallet can be configured using the following LNbits environment variables:
-
 
 ### CoreLightning
 
@@ -79,6 +76,15 @@ For the invoice to work you must have a publicly accessible URL in your LNbits. 
 - `OPENNODE_API_ENDPOINT`: https://api.opennode.com/
 - `OPENNODE_KEY`: opennodeAdminApiKey
 
+### Blink
+
+For the invoice to work you must have a publicly accessible URL in your LNbits. No manual webhook setting is necessary. You can generate a Blink API key after logging in or creating a new Blink account at: https://dashboard.blink.sv. For more info visit: https://dev.blink.sv/api/auth#create-an-api-key```
+
+- `LNBITS_BACKEND_WALLET_CLASS`: **BlinkWallet**
+- `BLINK_API_ENDPOINT`: https://api.blink.sv/graphql
+- `BLINK_WS_ENDPOINT`: wss://ws.blink.sv/graphql
+- `BLINK_TOKEN`: BlinkToken
+
 ### Alby
 
 For the invoice to work you must have a publicly accessible URL in your LNbits. No manual webhook setting is necessary. You can generate an alby access token here: https://getalby.com/developer/access_tokens/new
@@ -94,6 +100,15 @@ For the invoice to work you must have a publicly accessible URL in your LNbits. 
 - `LNBITS_BACKEND_WALLET_CLASS`: **ZBDWallet**
 - `ZBD_API_ENDPOINT`: https://api.zebedee.io/v0/
 - `ZBD_API_KEY`: ZBDApiKey
+
+### Phoenixd
+
+For the invoice to work you must have a publicly accessible URL in your LNbits. You can get a phoenixd API key from the install
+~/.phoenix/phoenix.conf, also see the documentation for phoenixd.
+
+- `LNBITS_BACKEND_WALLET_CLASS`: **PhoenixdWallet**
+- `PHOENIXD_API_ENDPOINT`: http://localhost:9740/
+- `PHOENIXD_API_PASSWORD`: PhoenixdApiPassword
 
 ### Cliche Wallet
 

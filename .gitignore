@@ -52,3 +52,6 @@ lnbits-backup.zip
 extensions
 upgrades/
 .idea
+
+# builded python package
+dist
