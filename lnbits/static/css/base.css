@@ -1,57 +1,3 @@
-[data-theme=lnc] .q-drawer--dark,
-body[data-theme=lnc].body--dark,
-[data-theme=lnc] .q-menu--dark {
-  background: #0a0a0a !important;
-}
-
-/* IF WANTING TO SET A DARKER BG COLOR IN THE FUTURE
-// set a darker body bg for all themes, when in "dark mode"
-body[data-theme='lnc'].body--dark {
-  background: scale-color($color, $lightness: -60%);
-}
-*/
-[data-theme=lnc] .q-card--dark,
-[data-theme=lnc] .q-stepper--dark {
-  background: #333646 !important;
-}
-
-[data-theme=lnc] .bg-primary {
-  background: #ffb400 !important;
-}
-[data-theme=lnc] .text-primary {
-  color: #ffb400 !important;
-}
-[data-theme=lnc] .bg-secondary {
-  background: #ffb400 !important;
-}
-[data-theme=lnc] .text-secondary {
-  color: #ffb400 !important;
-}
-[data-theme=lnc] .bg-dark {
-  background: #0a0a0a !important;
-}
-[data-theme=lnc] .text-dark {
-  color: #0a0a0a !important;
-}
-[data-theme=lnc] .bg-info {
-  background: #333646 !important;
-}
-[data-theme=lnc] .text-info {
-  color: #333646 !important;
-}
-[data-theme=lnc] .bg-marginal-bg {
-  background: #2d293b !important;
-}
-[data-theme=lnc] .text-marginal-bg {
-  color: #2d293b !important;
-}
-[data-theme=lnc] .bg-marginal-text {
-  background: #fff !important;
-}
-[data-theme=lnc] .text-marginal-text {
-  color: #fff !important;
-}
-
 [data-theme=classic] .q-drawer--dark,
 body[data-theme=classic].body--dark,
 [data-theme=classic] .q-menu--dark {
@@ -482,14 +428,6 @@ body[data-theme='monochrome'].body--dark {
 }
 [data-theme=monochrome] .text-marginal-text {
   color: rgb(255, 255, 255) !important;
-}
-
-[data-theme=lnc] .q-drawer--dark {
-  background: #0a0a0a !important;
-}
-
-[data-theme=lnc] .q-header {
-  background: #0a0a0a !important;
 }
 
 [data-theme=freedom] .q-drawer--dark {
