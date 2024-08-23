@@ -46,8 +46,8 @@ WORKDIR /app
 COPY . .
 COPY --from=builder /app/.venv .venv
 
-# Make sure this is runned on the Lightning Checkout branch
-RUN poetry install --only lnc
+# Make sure this is runned on the Lightning Checkout branch, not only main
+RUN poetry install
 # RUN poetry install --only main
 
 ENV LNBITS_PORT="5000"
