@@ -88,7 +88,7 @@ class FakeWallet(Wallet):
         self.payment_secrets[payment_hash] = preimage.hex()
 
         bolt11 = Bolt11(
-            currency="bc",
+            currency="bcrt",
             amount_msat=MilliSatoshi(amount * 1000),
             date=int(datetime.now().timestamp()),
             tags=tags,
