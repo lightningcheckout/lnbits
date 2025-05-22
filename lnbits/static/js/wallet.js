@@ -261,7 +261,9 @@ window.WalletPageLogic = {
           this.receive.paymentReq = response.data.bolt11
           this.receive.amountMsat = response.data.amount
           this.receive.paymentHash = response.data.payment_hash
-          this.readNfcTag()
+          if (!this.receive.lnurl) {
+            this.readNfcTag()
+          }
           // TODO: lnurl_callback and lnurl_response
           // WITHDRAW
           if (response.data.lnurl_response !== null) {
@@ -449,8 +451,8 @@ window.WalletPageLogic = {
               createdDate,
               'YYYY-MM-DDTHH:mm:ss.SSSZ'
             )
-            cleanInvoice.expireDateFrom = moment(expireDate).fromNow()
-            cleanInvoice.createdDateFrom = moment(createdDate).fromNow()
+            cleanInvoice.expireDateFrom = moment.utc(expireDate).fromNow()
+            cleanInvoice.createdDateFrom = moment.utc(createdDate).fromNow()
 
             cleanInvoice.expired = false // TODO
           }

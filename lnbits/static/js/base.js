@@ -252,13 +252,11 @@ window.LNbits = {
         fiat_currency: data.fiat_currency
       }
 
-      obj.date = Quasar.date.formatDate(new Date(obj.time), window.dateFormat)
-      obj.dateFrom = moment(obj.date).fromNow()
-      obj.expirydate = Quasar.date.formatDate(
-        new Date(obj.expiry),
-        window.dateFormat
-      )
-      obj.expirydateFrom = moment(obj.expirydate).fromNow()
+      obj.date = moment.utc(data.created_at).local().format(window.dateFormat)
+      obj.dateFrom = moment.utc(data.created_at).fromNow()
+
+      obj.expirydate = moment.utc(obj.expiry).local().format(window.dateFormat)
+      obj.expirydateFrom = moment.utc(obj.expiry).fromNow()
       obj.msat = obj.amount
       obj.sat = obj.msat / 1000
       obj.tag = obj.extra?.tag
@@ -495,8 +493,10 @@ window.windowMixin = {
         ? this.$q.localStorage.getItem('lnbits.backgroundImage')
         : USE_DEFAULT_BGIMAGE,
       isUserAuthorized: false,
+      isSatsDenomination: WINDOW_SETTINGS['LNBITS_DENOMINATION'] == 'sats',
       walletEventListeners: [],
-      backgroundImage: ''
+      backgroundImage: '',
+      ...WINDOW_SETTINGS
     }
   },
 
