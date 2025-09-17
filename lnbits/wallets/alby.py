@@ -1,11 +1,12 @@
 import asyncio
 import hashlib
 import json
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 import httpx
 from loguru import logger
 
+from lnbits.helpers import normalize_endpoint
 from lnbits.settings import settings
 
 from .base import (
@@ -27,7 +28,7 @@ class AlbyWallet(Wallet):
         if not settings.alby_access_token:
             raise ValueError("cannot initialize AlbyWallet: missing alby_access_token")
 
-        self.endpoint = self.normalize_endpoint(settings.alby_api_endpoint)
+        self.endpoint = normalize_endpoint(settings.alby_api_endpoint)
         self.auth = {
             "Authorization": "Bearer " + settings.alby_access_token,
             "User-Agent": settings.user_agent,
@@ -69,9 +70,9 @@ class AlbyWallet(Wallet):
     async def create_invoice(
         self,
         amount: int,
-        memo: Optional[str] = None,
-        description_hash: Optional[bytes] = None,
-        unhashed_description: Optional[bytes] = None,
+        memo: str | None = None,
+        description_hash: bytes | None = None,
+        unhashed_description: bytes | None = None,
         **_,
     ) -> InvoiceResponse:
         # https://api.getalby.com/invoices

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from time import time
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from lnbits.core.crud.extensions import get_user_active_extensions_ids
@@ -18,8 +18,8 @@ from ..models import (
 
 
 async def create_account(
-    account: Optional[Account] = None,
-    conn: Optional[Connection] = None,
+    account: Account | None = None,
+    conn: Connection | None = None,
 ) -> Account:
     if account:
         account.validate_fields()
@@ -36,7 +36,7 @@ async def update_account(account: Account) -> Account:
     return account
 
 
-async def delete_account(user_id: str, conn: Optional[Connection] = None) -> None:
+async def delete_account(user_id: str, conn: Connection | None = None) -> None:
     await (conn or db).execute(
         "DELETE from accounts WHERE id = :user",
         {"user": user_id},
@@ -44,8 +44,8 @@ async def delete_account(user_id: str, conn: Optional[Connection] = None) -> Non
 
 
 async def get_accounts(
-    filters: Optional[Filters[AccountFilters]] = None,
-    conn: Optional[Connection] = None,
+    filters: Filters[AccountFilters] | None = None,
+    conn: Connection | None = None,
 ) -> Page[AccountOverview]:
     where_clauses = []
     values: dict[str, Any] = {}
@@ -68,6 +68,7 @@ async def get_accounts(
             accounts.username,
             accounts.email,
             accounts.pubkey,
+            accounts.external_id,
             SUM(COALESCE((
                 SELECT balance FROM balances WHERE wallet_id = wallets.id
             ), 0)) as balance_msat,
@@ -91,9 +92,7 @@ async def get_accounts(
     )
 
 
-async def get_account(
-    user_id: str, conn: Optional[Connection] = None
-) -> Optional[Account]:
+async def get_account(user_id: str, conn: Connection | None = None) -> Account | None:
     if len(user_id) == 0:
         return None
     return await (conn or db).fetchone(
@@ -105,10 +104,11 @@ async def get_account(
 
 async def delete_accounts_no_wallets(
     time_delta: int,
-    conn: Optional[Connection] = None,
+    conn: Connection | None = None,
 ) -> None:
     delta = int(time()) - time_delta
     await (conn or db).execute(
+        # Timestamp placeholder is safe from SQL injection (not user input)
         f"""
         DELETE FROM accounts
         WHERE NOT EXISTS (
@@ -117,56 +117,59 @@ async def delete_accounts_no_wallets(
             (updated_at is null AND created_at < :delta)
             OR updated_at < {db.timestamp_placeholder("delta")}
         )
-        """,
+        """,  # noqa: S608
         {"delta": delta},
     )
 
 
 async def get_account_by_username(
-    username: str, conn: Optional[Connection] = None
-) -> Optional[Account]:
+    username: str, conn: Connection | None = None
+) -> Account | None:
     if len(username) == 0:
         return None
     return await (conn or db).fetchone(
-        "SELECT * FROM accounts WHERE username = :username",
-        {"username": username},
+        "SELECT * FROM accounts WHERE LOWER(username) = :username",
+        {"username": username.lower()},
         Account,
     )
 
 
 async def get_account_by_pubkey(
-    pubkey: str, conn: Optional[Connection] = None
-) -> Optional[Account]:
+    pubkey: str, conn: Connection | None = None
+) -> Account | None:
     return await (conn or db).fetchone(
-        "SELECT * FROM accounts WHERE pubkey = :pubkey",
-        {"pubkey": pubkey},
+        "SELECT * FROM accounts WHERE LOWER(pubkey) = :pubkey",
+        {"pubkey": pubkey.lower()},
         Account,
     )
 
 
 async def get_account_by_email(
-    email: str, conn: Optional[Connection] = None
-) -> Optional[Account]:
+    email: str, conn: Connection | None = None
+) -> Account | None:
     if len(email) == 0:
         return None
     return await (conn or db).fetchone(
-        "SELECT * FROM accounts WHERE email = :email",
-        {"email": email},
+        "SELECT * FROM accounts WHERE LOWER(email) = :email",
+        {"email": email.lower()},
         Account,
     )
 
 
 async def get_account_by_username_or_email(
-    username_or_email: str, conn: Optional[Connection] = None
-) -> Optional[Account]:
+    username_or_email: str, conn: Connection | None = None
+) -> Account | None:
     return await (conn or db).fetchone(
-        "SELECT * FROM accounts WHERE email = :value or username = :value",
-        {"value": username_or_email},
+        """
+            SELECT * FROM accounts
+            WHERE LOWER(email) = :value or LOWER(username) = :value
+        """,
+        {"value": username_or_email.lower()},
         Account,
     )
 
 
-async def get_user(user_id: str, conn: Optional[Connection] = None) -> Optional[User]:
+async def get_user(user_id: str, conn: Connection | None = None) -> User | None:
     account = await get_account(user_id, conn)
     if not account:
         return None
@@ -174,8 +177,8 @@ async def get_user(user_id: str, conn: Optional[Connection] = None) -> Optional[
 
 
 async def get_user_from_account(
-    account: Account, conn: Optional[Connection] = None
-) -> Optional[User]:
+    account: Account, conn: Connection | None = None
+) -> User | None:
     extensions = await get_user_active_extensions_ids(account.id, conn)
     wallets = await get_wallets(account.id, False, conn=conn)
     return User(
@@ -183,6 +186,7 @@ async def get_user_from_account(
         email=account.email,
         username=account.username,
         pubkey=account.pubkey,
+        external_id=account.external_id,
         extra=account.extra,
         created_at=account.created_at,
         updated_at=account.updated_at,
@@ -190,6 +194,7 @@ async def get_user_from_account(
         wallets=wallets,
         admin=account.is_admin,
         super_user=account.is_super_user,
+        fiat_providers=account.fiat_providers,
         has_password=account.password_hash is not None,
     )
 
@@ -200,7 +205,7 @@ async def update_user_access_control_list(user_acls: UserAcls):
 
 
 async def get_user_access_control_lists(
-    user_id: str, conn: Optional[Connection] = None
+    user_id: str, conn: Connection | None = None
 ) -> UserAcls:
     user_acls = await (conn or db).fetchone(
         "SELECT id, access_control_list FROM accounts WHERE id = :id",

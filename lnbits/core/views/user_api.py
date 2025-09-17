@@ -2,7 +2,6 @@ import base64
 import json
 import time
 from http import HTTPStatus
-from typing import List, Optional
 from uuid import uuid4
 
 import shortuuid
@@ -35,7 +34,7 @@ from lnbits.core.models.notifications import NotificationType
 from lnbits.core.models.users import Account
 from lnbits.core.services import (
     create_user_account_no_ckeck,
-    enqueue_notification,
+    enqueue_admin_notification,
     update_user_account,
     update_user_extensions,
     update_wallet_balance,
@@ -48,6 +47,7 @@ from lnbits.helpers import (
 )
 from lnbits.settings import EditableSettings, settings
 from lnbits.utils.exchange_rates import allowed_currencies
+from lnbits.utils.nostr import normalize_public_key
 
 users_router = APIRouter(
     prefix="/users/api/v1", dependencies=[Depends(check_admin)], tags=["Users"]
@@ -95,11 +95,15 @@ async def api_create_user(data: CreateUser) -> CreateUser:
     data.extra = data.extra or UserExtra()
     data.extra.provider = data.extra.provider or "lnbits"
 
+    if data.pubkey:
+        data.pubkey = normalize_public_key(data.pubkey)
+
     account = Account(
         id=uuid4().hex,
         username=data.username,
         email=data.email,
         pubkey=data.pubkey,
+        external_id=data.external_id,
         extra=data.extra,
     )
     account.validate_fields()
@@ -127,11 +131,15 @@ async def api_update_user(
             HTTPStatus.BAD_REQUEST, "Use 'reset password' functionality."
         )
 
+    if data.pubkey:
+        data.pubkey = normalize_public_key(data.pubkey)
+
     account = Account(
         id=user_id,
         username=data.username,
         email=data.email,
         pubkey=data.pubkey,
+        external_id=data.external_id,
         extra=data.extra or UserExtra(),
     )
     await update_user_account(account)
@@ -148,7 +156,7 @@ async def api_update_user(
 async def api_users_delete_user(
     user_id: str, user: User = Depends(check_admin)
 ) -> SimpleStatus:
-    wallets = await get_wallets(user_id)
+    wallets = await get_wallets(user_id, deleted=False)
     if len(wallets) > 0:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -185,7 +193,8 @@ async def api_users_reset_password(user_id: str) -> str:
     reset_data = ["reset", user_id, int(time.time())]
     reset_data_json = json.dumps(reset_data, separators=(",", ":"), ensure_ascii=False)
     reset_key = encrypt_internal_message(reset_data_json)
-    assert reset_key, "Cannot generate reset key."
+    if not reset_key:
+        raise ValueError("Cannot generate reset key.")
     reset_key_b64 = base64.b64encode(reset_key.encode()).decode()
     return f"reset_key_{reset_key_b64}"
 
@@ -214,13 +223,13 @@ async def api_users_toggle_admin(user_id: str) -> SimpleStatus:
 
 
 @users_router.get("/user/{user_id}/wallet", name="Get wallets for user")
-async def api_users_get_user_wallet(user_id: str) -> List[Wallet]:
+async def api_users_get_user_wallet(user_id: str) -> list[Wallet]:
     return await get_wallets(user_id)
 
 
 @users_router.post("/user/{user_id}/wallet", name="Create a new wallet for user")
 async def api_users_create_user_wallet(
-    user_id: str, name: Optional[str] = Body(None), currency: Optional[str] = Body(None)
+    user_id: str, name: str | None = Body(None), currency: str | None = Body(None)
 ):
     if currency and currency not in allowed_currencies():
         raise ValueError(f"Currency '{currency}' not allowed.")
@@ -255,6 +264,28 @@ async def api_users_undelete_user_wallet(user_id: str, wallet: str) -> SimpleSta
         return SimpleStatus(success=True, message="Wallet undeleted.")
 
     return SimpleStatus(success=True, message="Wallet is already active.")
+
+
+@users_router.delete(
+    "/user/{user_id}/wallets",
+    name="Delete all wallets for user",
+    summary="Soft delete (only sets a flag) all user wallets.",
+)
+async def api_users_delete_all_user_wallet(user_id: str) -> SimpleStatus:
+    if user_id == settings.super_user:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Action not allowed.",
+        )
+
+    wallets = await get_wallets(user_id, deleted=False)
+    for wallet in wallets:
+        await delete_wallet(user_id=user_id, wallet_id=wallet.id)
+
+    return SimpleStatus(
+        success=True,
+        message=f"Deleted '{len(wallets)}' wallets. ",
+    )
 
 
 @users_router.delete(
@@ -296,7 +327,7 @@ async def api_update_balance(data: UpdateBalance) -> SimpleStatus:
     if not wallet:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Wallet not found.")
     await update_wallet_balance(wallet=wallet, amount=int(data.amount))
-    enqueue_notification(
+    enqueue_admin_notification(
         NotificationType.balance_update,
         {
             "amount": int(data.amount),

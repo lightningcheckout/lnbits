@@ -1,5 +1,5 @@
 from http import HTTPStatus
-from typing import Annotated, List, Optional, Union
+from typing import Annotated
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -7,7 +7,7 @@ from fastapi import Cookie, Depends, Query, Request
 from fastapi.exceptions import HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.routing import APIRouter
-from lnurl import decode as lnurl_decode
+from lnurl import url_decode
 from pydantic.types import UUID4
 
 from lnbits.core.helpers import to_valid_user_id
@@ -70,7 +70,7 @@ async def robots():
 
 @generic_router.get("/extensions", name="extensions", response_class=HTMLResponse)
 async def extensions(request: Request, user: User = Depends(check_user_exists)):
-    installed_exts: List[InstallableExtension] = await get_installed_extensions()
+    installed_exts: list[InstallableExtension] = await get_installed_extensions()
     installed_exts_ids = [e.id for e in installed_exts]
 
     installable_exts = await InstallableExtension.get_installable_extensions()
@@ -161,9 +161,9 @@ async def extensions(request: Request, user: User = Depends(check_user_exists)):
 )
 async def wallet(
     request: Request,
-    lnbits_last_active_wallet: Annotated[Union[str, None], Cookie()] = None,
+    lnbits_last_active_wallet: Annotated[str | None, Cookie()] = None,
     user: User = Depends(check_user_exists),
-    wal: Optional[UUID4] = Query(None),
+    wal: UUID4 | None = Query(None),
 ):
     if wal:
         wallet = await get_wallet(wal.hex)
@@ -206,9 +206,32 @@ async def account(
     request: Request,
     user: User = Depends(check_user_exists),
 ):
+    nostr_configured = settings.is_nostr_notifications_configured()
+    telegram_configured = settings.is_telegram_notifications_configured()
     return template_renderer().TemplateResponse(
         request,
         "core/account.html",
+        {
+            "user": user.json(),
+            "nostr_configured": nostr_configured,
+            "telegram_configured": telegram_configured,
+            "ajax": _is_ajax_request(request),
+        },
+    )
+
+
+@generic_router.get(
+    "/wallets",
+    response_class=HTMLResponse,
+    description="show wallets page",
+)
+async def wallets(
+    request: Request,
+    user: User = Depends(check_user_exists),
+):
+    return template_renderer().TemplateResponse(
+        request,
+        "core/wallets.html",
         {
             "user": user.json(),
             "ajax": _is_ajax_request(request),
@@ -322,7 +345,6 @@ async def node(request: Request, user: User = Depends(check_admin)):
         "node/index.html",
         {
             "user": user.json(),
-            "settings": settings.dict(),
             "balance": balance,
             "wallets": user.wallets[0].json(),
             "ajax": _is_ajax_request(request),
@@ -342,7 +364,6 @@ async def node_public(request: Request):
         request,
         "node/public.html",
         {
-            "settings": settings.dict(),
             "balance": balance,
         },
     )
@@ -361,7 +382,6 @@ async def admin_index(request: Request, user: User = Depends(check_admin)):
         "admin/index.html",
         {
             "user": user.json(),
-            "settings": settings.dict(),
             "balance": balance,
             "currencies": list(currencies.keys()),
             "ajax": _is_ajax_request(request),
@@ -379,7 +399,6 @@ async def users_index(request: Request, user: User = Depends(check_admin)):
         {
             "request": request,
             "user": user.json(),
-            "settings": settings.dict(),
             "currencies": list(currencies.keys()),
             "ajax": _is_ajax_request(request),
         },
@@ -402,7 +421,7 @@ async def audit_index(request: Request, user: User = Depends(check_admin)):
 
 
 @generic_router.get("/payments", response_class=HTMLResponse)
-async def payments_index(request: Request, user: User = Depends(check_admin)):
+async def payments_index(request: Request, user: User = Depends(check_user_exists)):
     return template_renderer().TemplateResponse(
         "payments/index.html",
         {
@@ -437,7 +456,7 @@ async def lnurlwallet(request: Request, lightning: str = ""):
     if not settings.lnbits_allow_new_accounts:
         return {"status": "ERROR", "reason": "New accounts are not allowed."}
 
-    lnurl = lnurl_decode(lightning)
+    lnurl = url_decode(lightning)
 
     async with httpx.AsyncClient() as client:
         check_callback_url(lnurl)

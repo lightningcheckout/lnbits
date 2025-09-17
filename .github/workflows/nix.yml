@@ -14,14 +14,14 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - 'pyproject.toml'
-      - 'poetry.lock'
+      - 'uv.lock'
       - '.github/workflows/nix.yml'
   pull_request:
     paths:
       - 'flake.nix'
       - 'flake.lock'
       - 'pyproject.toml'
-      - 'poetry.lock'
+      - 'uv.lock'
 
 jobs:
   nix:

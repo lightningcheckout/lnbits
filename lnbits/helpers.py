@@ -3,7 +3,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional, Type
+from typing import Any
 from urllib import request
 from urllib.parse import urlparse
 
@@ -11,12 +11,11 @@ import jinja2
 import jwt
 import shortuuid
 from fastapi.routing import APIRoute
+from loguru import logger
 from packaging import version
 from pydantic.schema import field_schema
 
 from lnbits.jinja2_templating import Jinja2Templates
-from lnbits.nodes import get_node_class
-from lnbits.requestvars import g
 from lnbits.settings import settings
 from lnbits.utils.crypto import AESCipher
 
@@ -40,8 +39,8 @@ def urlsafe_short_hash() -> str:
     return shortuuid.uuid()
 
 
-def url_for(endpoint: str, external: Optional[bool] = False, **params: Any) -> str:
-    base = g().base_url if external else ""
+def url_for(endpoint: str, external: bool | None = False, **params: Any) -> str:
+    base = f"http://{settings.host}:{settings.port}" if external else ""
     url_params = "?"
     for key, value in params.items():
         url_params += f"{key}={value}&"
@@ -53,7 +52,7 @@ def static_url_for(static: str, path: str) -> str:
     return f"/{static}/{path}?v={settings.server_startup_time}"
 
 
-def template_renderer(additional_folders: Optional[list] = None) -> Jinja2Templates:
+def template_renderer(additional_folders: list | None = None) -> Jinja2Templates:
     folders = ["lnbits/templates", "lnbits/core/templates"]
     if additional_folders:
         additional_folders += [
@@ -76,13 +75,15 @@ def template_renderer(additional_folders: Optional[list] = None) -> Jinja2Templa
         "LNBITS_ADMIN_UI": settings.lnbits_admin_ui,
         "LNBITS_AUDIT_ENABLED": settings.lnbits_audit_enabled,
         "LNBITS_AUTH_METHODS": settings.auth_allowed_methods,
+        "LNBITS_AUTH_KEYCLOAK_ORG": settings.keycloak_client_custom_org,
+        "LNBITS_AUTH_KEYCLOAK_ICON": settings.keycloak_client_custom_icon,
         "LNBITS_CUSTOM_IMAGE": settings.lnbits_custom_image,
         "LNBITS_CUSTOM_BADGE": settings.lnbits_custom_badge,
         "LNBITS_CUSTOM_BADGE_COLOR": settings.lnbits_custom_badge_color,
         "LNBITS_EXTENSIONS_DEACTIVATE_ALL": settings.lnbits_extensions_deactivate_all,
         "LNBITS_NEW_ACCOUNTS_ALLOWED": settings.new_accounts_allowed,
-        "LNBITS_NODE_UI": settings.lnbits_node_ui and get_node_class() is not None,
-        "LNBITS_NODE_UI_AVAILABLE": get_node_class() is not None,
+        "LNBITS_NODE_UI": settings.lnbits_node_ui and settings.has_nodemanager,
+        "LNBITS_NODE_UI_AVAILABLE": settings.has_nodemanager,
         "LNBITS_QR_LOGO": settings.lnbits_qr_logo,
         "LNBITS_SERVICE_FEE": settings.lnbits_service_fee,
         "LNBITS_SERVICE_FEE_MAX": settings.lnbits_service_fee_max,
@@ -98,11 +99,8 @@ def template_renderer(additional_folders: Optional[list] = None) -> Jinja2Templa
         "USE_DEFAULT_BGIMAGE": settings.lnbits_default_bgimage,
         "VOIDWALLET": settings.lnbits_backend_wallet_class == "VoidWallet",
         "WEBPUSH_PUBKEY": settings.lnbits_webpush_pubkey,
-        "LNBITS_DENOMINATION": (
-            settings.lnbits_denomination
-            if settings.lnbits_denomination == "FakeWallet"
-            else "sats"
-        ),
+        "LNBITS_DENOMINATION": settings.lnbits_denomination,
+        "has_holdinvoice": settings.has_holdinvoice,
     }
 
     t.env.globals["WINDOW_SETTINGS"] = window_settings
@@ -151,7 +149,7 @@ def get_current_extension_name() -> str:
     return ext_name
 
 
-def generate_filter_params_openapi(model: Type[FilterModel], keep_optional=False):
+def generate_filter_params_openapi(model: type[FilterModel], keep_optional=False):
     """
     Generate openapi documentation for Filters. This is intended to be used along
     parse_filters (see example)
@@ -195,6 +193,14 @@ def is_valid_username(username: str) -> bool:
     return re.fullmatch(username_regex, username) is not None
 
 
+def is_valid_external_id(external_id: str) -> bool:
+    if len(external_id) > 256:
+        return False
+    if " " in external_id or "\n" in external_id:
+        return False
+    return True
+
+
 def is_valid_pubkey(pubkey: str) -> bool:
     if len(pubkey) != 64:
         return False
@@ -205,7 +211,7 @@ def is_valid_pubkey(pubkey: str) -> bool:
         return False
 
 
-def create_access_token(data: dict, token_expire_minutes: Optional[int] = None) -> str:
+def create_access_token(data: dict, token_expire_minutes: int | None = None) -> str:
     minutes = token_expire_minutes or settings.auth_token_expire_minutes
     expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
     to_encode = {k: v for k, v in data.items() if v is not None}
@@ -213,9 +219,7 @@ def create_access_token(data: dict, token_expire_minutes: Optional[int] = None) 
     return jwt.encode(to_encode, settings.auth_secret_key, "HS256")
 
 
-def encrypt_internal_message(
-    m: Optional[str] = None, urlsafe: bool = False
-) -> Optional[str]:
+def encrypt_internal_message(m: str | None = None, urlsafe: bool = False) -> str | None:
     """
     Encrypt message with the internal secret key
 
@@ -228,9 +232,7 @@ def encrypt_internal_message(
     return AESCipher(key=settings.auth_secret_key).encrypt(m.encode(), urlsafe=urlsafe)
 
 
-def decrypt_internal_message(
-    m: Optional[str] = None, urlsafe: bool = False
-) -> Optional[str]:
+def decrypt_internal_message(m: str | None = None, urlsafe: bool = False) -> str | None:
     """
     Decrypt message with the internal secret key
 
@@ -243,7 +245,7 @@ def decrypt_internal_message(
     return AESCipher(key=settings.auth_secret_key).decrypt(m, urlsafe=urlsafe)
 
 
-def filter_dict_keys(data: dict, filter_keys: Optional[list[str]]) -> dict:
+def filter_dict_keys(data: dict, filter_keys: list[str] | None) -> dict:
     if not filter_keys:
         # return shallow clone of the dict even if there are no filters
         return {**data}
@@ -264,7 +266,7 @@ def version_parse(v: str):
 
 
 def is_lnbits_version_ok(
-    min_lnbits_version: Optional[str], max_lnbits_version: Optional[str]
+    min_lnbits_version: str | None, max_lnbits_version: str | None
 ) -> bool:
     if min_lnbits_version and (
         version_parse(min_lnbits_version) > version_parse(settings.version)
@@ -279,16 +281,28 @@ def is_lnbits_version_ok(
 
 
 def check_callback_url(url: str):
-    netloc = urlparse(url).netloc
+    if not settings.lnbits_callback_url_rules:
+        # no rules, all urls are allowed
+        return
+    u = urlparse(url)
     for rule in settings.lnbits_callback_url_rules:
-        if re.match(rule, netloc) is None:
-            raise ValueError(
-                f"Callback not allowed. URL: {url}. Netloc: {netloc}. Rule: {rule}"
-            )
+        try:
+            if re.match(rule, f"{u.scheme}://{u.netloc}") is not None:
+                return
+        except re.error:
+            logger.debug(f"Invalid regex rule: '{rule}'. ")
+            continue
+    raise ValueError(
+        f"Callback not allowed. URL: {url}. Netloc: {u.netloc}. "
+        f"Please check your admin settings."
+    )
 
 
-def download_url(url, save_path):
-    with request.urlopen(url, timeout=60) as dl_file:
+def download_url(url: str, save_path: Path):
+    if not url.startswith(("http:", "https:")):
+        raise ValueError(f"Invalid URL: {url}. Must start with 'http' or 'https'.")
+
+    with request.urlopen(url, timeout=60) as dl_file:  # noqa: S310
         with open(save_path, "wb") as out_file:
             out_file.write(dl_file.read())
 
@@ -329,7 +343,7 @@ def path_segments(path: str) -> list[str]:
     return segments[0:]
 
 
-def normalize_path(path: Optional[str]) -> str:
+def normalize_path(path: str | None) -> str:
     path = path or ""
     return "/" + "/".join(path_segments(path))
 
@@ -343,3 +357,14 @@ def safe_upload_file_path(filename: str, directory: str = "images") -> Path:
     # Prevent filename with subdirectories
     file_path = image_folder / filename.split("/")[-1]
     return file_path.resolve()
+
+
+def normalize_endpoint(endpoint: str, add_proto=True) -> str:
+    endpoint = endpoint[:-1] if endpoint.endswith("/") else endpoint
+    if add_proto:
+        if endpoint.startswith("ws://") or endpoint.startswith("wss://"):
+            return endpoint
+        endpoint = (
+            f"https://{endpoint}" if not endpoint.startswith("http") else endpoint
+        )
+    return endpoint

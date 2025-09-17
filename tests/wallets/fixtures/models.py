@@ -1,30 +1,28 @@
-from typing import Dict, List, Optional, Union
-
 from pydantic import BaseModel
 
 
 class FundingSourceConfig(BaseModel):
     name: str
-    skip: Optional[bool]
+    skip: bool | None
     wallet_class: str
     settings: dict
-    mock_settings: Optional[dict]
+    mock_settings: dict | None
 
 
 class FunctionMock(BaseModel):
-    uri: Optional[str]
-    query_params: Optional[dict]
-    headers: Optional[dict]
-    method: Optional[str]
+    uri: str | None
+    query_params: dict | None
+    headers: dict | None
+    method: str | None
 
 
 class TestMock(BaseModel):
-    skip: Optional[bool]
-    description: Optional[str]
-    request_type: Optional[str]
-    request_body: Optional[dict]
+    skip: bool | None
+    description: str | None
+    request_type: str | None
+    request_body: dict | None
     response_type: str
-    response: Union[str, dict, list]
+    response: str | dict | list
 
 
 class Mock(FunctionMock, TestMock):
@@ -41,35 +39,35 @@ class Mock(FunctionMock, TestMock):
 
 
 class FunctionMocks(BaseModel):
-    mocks: Dict[str, FunctionMock]
+    mocks: dict[str, FunctionMock]
 
 
 class FunctionTest(BaseModel):
     description: str
     call_params: dict
     expect: dict
-    mocks: Dict[str, List[Dict[str, TestMock]]]
+    mocks: dict[str, list[dict[str, TestMock]]]
 
 
 class FunctionData(BaseModel):
     """Data required for testing this function"""
 
     "Function level mocks that apply for all tests of this function"
-    mocks: List[FunctionMock] = []
+    mocks: list[FunctionMock] = []
 
     "All the tests for this function"
-    tests: List[FunctionTest] = []
+    tests: list[FunctionTest] = []
 
 
 class WalletTest(BaseModel):
-    skip: Optional[bool]
+    skip: bool | None
     function: str
     description: str
     funding_source: FundingSourceConfig
-    call_params: Optional[dict] = {}
-    expect: Optional[dict]
-    expect_error: Optional[dict]
-    mocks: List[Mock] = []
+    call_params: dict | None = {}
+    expect: dict | None
+    expect_error: dict | None
+    mocks: list[Mock] = []
 
     @staticmethod
     def tests_for_funding_source(
@@ -77,7 +75,7 @@ class WalletTest(BaseModel):
         fn_name: str,
         fn,
         test,
-    ) -> List["WalletTest"]:
+    ) -> list["WalletTest"]:
         t = WalletTest(
             **{
                 "funding_source": fs,
@@ -96,7 +94,7 @@ class WalletTest(BaseModel):
 
         return [t]
 
-    def _tests_from_fs_mocks(self, fn, test, fs_name: str) -> List["WalletTest"]:
+    def _tests_from_fs_mocks(self, fn, test, fs_name: str) -> list["WalletTest"]:
 
         fs_mocks = fn["mocks"][fs_name]
         test_mocks = test["mocks"][fs_name]
@@ -132,7 +130,7 @@ class WalletTest(BaseModel):
 
     def _tests_from_mock(self, mock_obj) -> "WalletTest":
 
-        test_mocks: List[Mock] = [
+        test_mocks: list[Mock] = [
             Mock.combine_mocks(
                 mock_name,
                 mock_obj[mock_name]["fs_mock"],

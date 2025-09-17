@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
 import json
-import random
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+from secrets import token_urlsafe
 
 import httpx
 from loguru import logger
 
+from lnbits.helpers import normalize_endpoint
 from lnbits.settings import settings
 
 from .base import (
@@ -36,7 +37,7 @@ class SparkWallet(Wallet):
         if not settings.spark_token:
             raise ValueError("cannot initialize SparkWallet: missing spark_token")
 
-        url = self.normalize_endpoint(settings.spark_url)
+        url = normalize_endpoint(settings.spark_url)
         url = url.replace("/rpc", "")
         self.token = settings.spark_token
 
@@ -109,12 +110,12 @@ class SparkWallet(Wallet):
     async def create_invoice(
         self,
         amount: int,
-        memo: Optional[str] = None,
-        description_hash: Optional[bytes] = None,
-        unhashed_description: Optional[bytes] = None,
+        memo: str | None = None,
+        description_hash: bytes | None = None,
+        unhashed_description: bytes | None = None,
         **kwargs,
     ) -> InvoiceResponse:
-        label = f"lbs{random.random()}"
+        label = f"lbs{token_urlsafe(16)}"
         try:
             if description_hash:
                 r = await self.invoicewithdescriptionhash(

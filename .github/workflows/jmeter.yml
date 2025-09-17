@@ -8,11 +8,6 @@ on:
         required: true
         default: "3.10"
         type: string
-      poetry-version:
-        description: "Poetry Version"
-        required: true
-        default: "1.5.1"
-        type: string
 
 jobs:
   jmeter:
@@ -30,7 +25,7 @@ jobs:
           LNBITS_EXTENSIONS_DEFAULT_INSTALL: "watchonly, satspay, tipjar, tpos, lnurlp, withdraw"
           LNBITS_BACKEND_WALLET_CLASS: FakeWallet
         run: |
-          poetry run lnbits &
+          uv run lnbits &
           sleep 10
 
       - name: setup java version

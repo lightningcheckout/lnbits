@@ -1,6 +1,5 @@
 import asyncio
 import importlib
-from typing import Optional
 
 from loguru import logger
 
@@ -26,10 +25,11 @@ async def install_extension(ext_info: InstallableExtension) -> Extension:
 
     ext_info.meta = ext_info.meta or ExtensionMeta()
 
-    if ext_info.meta.installed_release:
-        assert (
-            ext_info.meta.installed_release.is_version_compatible
-        ), "Incompatible extension version"
+    if (
+        ext_info.meta.installed_release
+        and not ext_info.meta.installed_release.is_version_compatible
+    ):
+        raise ValueError("Incompatible extension version")
 
     installed_ext = await get_installed_extension(ext_info.id)
     if installed_ext and installed_ext.meta:
@@ -73,11 +73,13 @@ async def uninstall_extension(ext_id: str):
 async def activate_extension(ext: Extension):
     core_app_extra.register_new_ext_routes(ext)
     await update_installed_extension_state(ext_id=ext.code, active=True)
+    await start_extension_background_work(ext.code)
 
 
 async def deactivate_extension(ext_id: str):
     settings.deactivate_extension_paths(ext_id)
     await update_installed_extension_state(ext_id=ext_id, active=False)
+    await stop_extension_background_work(ext_id)
 
 
 async def stop_extension_background_work(ext_id: str) -> bool:
@@ -93,9 +95,8 @@ async def stop_extension_background_work(ext_id: str) -> bool:
         old_module = importlib.import_module(ext.module_name)
 
         stop_fn_name = f"{ext_id}_stop"
-        assert hasattr(
-            old_module, stop_fn_name
-        ), f"No stop function found for '{ext.module_name}'."
+        if not hasattr(old_module, stop_fn_name):
+            raise ValueError(f"No stop function found for '{ext.module_name}'.")
 
         stop_fn = getattr(old_module, stop_fn_name)
         if stop_fn:
@@ -145,7 +146,7 @@ async def start_extension_background_work(ext_id: str) -> bool:
 
 
 async def get_valid_extensions(
-    include_deactivated: Optional[bool] = True,
+    include_deactivated: bool | None = True,
 ) -> list[Extension]:
     installed_extensions = await get_installed_extensions()
     valid_extensions = [Extension.from_installable_ext(e) for e in installed_extensions]
@@ -164,8 +165,8 @@ async def get_valid_extensions(
 
 
 async def get_valid_extension(
-    ext_id: str, include_deactivated: Optional[bool] = True
-) -> Optional[Extension]:
+    ext_id: str, include_deactivated: bool | None = True
+) -> Extension | None:
     ext = await get_installed_extension(ext_id)
     if not ext:
         return None

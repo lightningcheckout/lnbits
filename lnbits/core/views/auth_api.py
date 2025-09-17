@@ -1,9 +1,9 @@
 import base64
 import importlib
 import json
+from collections.abc import Callable
 from http import HTTPStatus
 from time import time
-from typing import Callable, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -191,12 +191,14 @@ async def api_create_user_api_token(
     data: ApiTokenRequest,
     user: User = Depends(check_user_exists),
 ) -> ApiTokenResponse:
-    assert data.expiration_time_minutes > 0, "Expiration time must be in the future."
+    if not data.expiration_time_minutes > 0:
+        raise ValueError("Expiration time must be in the future.")
     account = await get_account(user.id)
     if not account or not account.verify_password(data.password):
         raise HTTPException(HTTPStatus.UNAUTHORIZED, "Invalid credentials.")
 
-    assert account.username, "Username must be configured."
+    if not account.username:
+        raise ValueError("Username must be configured.")
 
     acls = await get_user_access_control_lists(user.id)
     acl = acls.get_acl_by_id(data.acl_id)
@@ -223,7 +225,8 @@ async def api_delete_user_api_token(
     if not account or not account.verify_password(data.password):
         raise HTTPException(HTTPStatus.UNAUTHORIZED, "Invalid credentials.")
 
-    assert account.username, "Username must be configured."
+    if not account.username:
+        raise ValueError("Username must be configured.")
 
     acls = await get_user_access_control_lists(user.id)
     acl = acls.get_acl_by_id(data.acl_id)
@@ -235,7 +238,7 @@ async def api_delete_user_api_token(
 
 @auth_router.get("/{provider}", description="SSO Provider")
 async def login_with_sso_provider(
-    request: Request, provider: str, user_id: Optional[str] = None
+    request: Request, provider: str, user_id: str | None = None
 ):
     provider_sso = _new_sso(provider)
     if not provider_sso:
@@ -316,9 +319,9 @@ async def update_pubkey(
     data: UpdateUserPubkey,
     user: User = Depends(check_user_exists),
     payload: AccessTokenPayload = Depends(access_token_payload),
-) -> Optional[User]:
+) -> User | None:
     if data.user_id != user.id:
-        raise HTTPException(HTTPStatus.BAD_REQUEST, "Invalid user ID.")
+        raise ValueError("Invalid user ID.")
 
     _validate_auth_timeout(payload.auth_time)
     if (
@@ -326,7 +329,7 @@ async def update_pubkey(
         and data.pubkey != user.pubkey
         and await get_account_by_pubkey(data.pubkey)
     ):
-        raise HTTPException(HTTPStatus.BAD_REQUEST, "Public key already in use.")
+        raise ValueError("Public key already in use.")
 
     account = await get_account(user.id)
     if not account:
@@ -342,9 +345,10 @@ async def update_password(
     data: UpdateUserPassword,
     user: User = Depends(check_user_exists),
     payload: AccessTokenPayload = Depends(access_token_payload),
-) -> Optional[User]:
+) -> User | None:
     _validate_auth_timeout(payload.auth_time)
-    assert data.user_id == user.id, "Invalid user ID."
+    if data.user_id != user.id:
+        raise ValueError("Invalid user ID.")
     if (
         data.username
         and user.username != data.username
@@ -353,12 +357,15 @@ async def update_password(
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Username already exists.")
 
     account = await get_account(user.id)
-    assert account, "Account not found."
+    if not account:
+        raise ValueError("Account not found.")
 
     # old accounts do not have a password
     if account.password_hash:
-        assert data.password_old, "Missing old password."
-        assert account.verify_password(data.password_old), "Invalid old password."
+        if not data.password_old:
+            raise ValueError("Missing old password.")
+        if not account.verify_password(data.password_old):
+            raise ValueError("Invalid old password.")
 
     account.username = data.username
     account.hash_password(data.password)
@@ -376,8 +383,10 @@ async def reset_password(data: ResetUserPassword) -> JSONResponse:
             HTTPStatus.FORBIDDEN, "Auth by 'Username and Password' not allowed."
         )
 
-    assert data.password == data.password_repeat, "Passwords do not match."
-    assert data.reset_key[:10].startswith("reset_key_"), "This is not a reset key."
+    if data.password != data.password_repeat:
+        raise ValueError("Passwords do not match.")
+    if not data.reset_key[:10].startswith("reset_key_"):
+        raise ValueError("This is not a reset key.")
 
     try:
         reset_key = base64.b64decode(data.reset_key[10:]).decode()
@@ -385,12 +394,16 @@ async def reset_password(data: ResetUserPassword) -> JSONResponse:
     except Exception as exc:
         raise ValueError("Invalid reset key.") from exc
 
-    assert reset_data_json, "Cannot process reset key."
+    if not reset_data_json:
+        raise ValueError("Cannot process reset key.")
 
     action, user_id, request_time = json.loads(reset_data_json)
-    assert action, "Missing action."
-    assert user_id, "Missing user ID."
-    assert request_time, "Missing reset time."
+    if not action:
+        raise ValueError("Missing action.")
+    if not user_id:
+        raise ValueError("Missing user ID.")
+    if not request_time:
+        raise ValueError("Missing reset time.")
 
     _validate_auth_timeout(request_time)
 
@@ -406,28 +419,18 @@ async def reset_password(data: ResetUserPassword) -> JSONResponse:
 @auth_router.put("/update")
 async def update(
     data: UpdateUser, user: User = Depends(check_user_exists)
-) -> Optional[User]:
+) -> User | None:
     if data.user_id != user.id:
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Invalid user ID.")
     if data.username and not is_valid_username(data.username):
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Invalid username.")
-    if data.email != user.email:
-        raise HTTPException(
-            HTTPStatus.BAD_REQUEST,
-            "Email mismatch.",
-        )
+
     if (
         data.username
         and user.username != data.username
         and await get_account_by_username(data.username)
     ):
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Username already exists.")
-    if (
-        data.email
-        and data.email != user.email
-        and await get_account_by_email(data.email)
-    ):
-        raise HTTPException(HTTPStatus.BAD_REQUEST, "Email already exists.")
 
     account = await get_account(user.id)
     if not account:
@@ -435,8 +438,6 @@ async def update(
 
     if data.username:
         account.username = data.username
-    if data.email:
-        account.email = data.email
     if data.extra:
         account.extra = data.extra
 
@@ -460,7 +461,7 @@ async def first_install(data: UpdateSuperuserPassword) -> JSONResponse:
     return _auth_success_response(account.username, account.id, account.email)
 
 
-async def _handle_sso_login(userinfo: OpenID, verified_user_id: Optional[str] = None):
+async def _handle_sso_login(userinfo: OpenID, verified_user_id: str | None = None):
     email = userinfo.email
     if not email or not is_valid_email_address(email):
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Invalid email.")
@@ -489,9 +490,9 @@ async def _handle_sso_login(userinfo: OpenID, verified_user_id: Optional[str] = 
 
 
 def _auth_success_response(
-    username: Optional[str] = None,
-    user_id: Optional[str] = None,
-    email: Optional[str] = None,
+    username: str | None = None,
+    user_id: str | None = None,
+    email: str | None = None,
 ) -> JSONResponse:
     payload = AccessTokenPayload(
         sub=username or "", usr=user_id, email=email, auth_time=int(time())
@@ -532,7 +533,7 @@ def _auth_redirect_response(path: str, email: str) -> RedirectResponse:
     return response
 
 
-def _new_sso(provider: str) -> Optional[SSOBase]:
+def _new_sso(provider: str) -> SSOBase | None:
     try:
         if not settings.is_auth_method_allowed(AuthMethods(f"{provider}-auth")):
             return None
@@ -569,8 +570,8 @@ def _find_auth_provider_class(provider: str) -> Callable:
             provider_class = getattr(provider_module, f"{provider.title()}SSO")
             if provider_class:
                 return provider_class
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(exc)
 
     raise ValueError(f"No SSO provider found for '{provider}'.")
 
@@ -588,31 +589,43 @@ def _nostr_nip98_event(request: Request) -> dict:
         event = json.loads(event_json)
     except Exception as exc:
         logger.warning(exc)
-    assert event, "Nostr login event cannot be parsed."
+    if not event:
+        raise ValueError("Nostr login event cannot be parsed.")
 
     if not verify_event(event):
         raise HTTPException(HTTPStatus.BAD_REQUEST, "Nostr login event is not valid.")
-    assert event["kind"] == 27_235, "Invalid event kind."
+    if not event["kind"] == 27_235:
+        raise ValueError("Invalid event kind.")
 
     auth_threshold = settings.auth_credetials_update_threshold
-    assert (
-        abs(time() - event["created_at"]) < auth_threshold
-    ), f"More than {auth_threshold} seconds have passed since the event was signed."
+    if not (abs(time() - event["created_at"]) < auth_threshold):
+        raise ValueError(
+            f"More than {auth_threshold} seconds have passed "
+            "since the event was signed."
+        )
 
-    method: Optional[str] = next((v for k, v in event["tags"] if k == "method"), None)
-    assert method, "Tag 'method' is missing."
-    assert method.upper() == "POST", "Invalid value for tag 'method'."
-
-    url = next((v for k, v in event["tags"] if k == "u"), None)
-
-    assert url, "Tag 'u' for URL is missing."
-    accepted_urls = [f"{u}/nostr" for u in settings.nostr_absolute_request_urls]
-    assert url in accepted_urls, f"Invalid value for tag 'u': '{url}'."
+    _check_nostr_event_tags(event)
 
     return event
 
 
-def _validate_auth_timeout(auth_time: Optional[int] = 0):
+def _check_nostr_event_tags(event: dict):
+    method: str | None = next((v for k, v in event["tags"] if k == "method"), None)
+    if not method:
+        raise ValueError("Tag 'method' is missing.")
+    if not method.upper() == "POST":
+        raise ValueError("Invalid value for tag 'method'.")
+
+    url = next((v for k, v in event["tags"] if k == "u"), None)
+
+    if not url:
+        raise ValueError("Tag 'u' for URL is missing.")
+    accepted_urls = [f"{u}/nostr" for u in settings.nostr_absolute_request_urls]
+    if url not in accepted_urls:
+        raise ValueError(f"Invalid value for tag 'u': '{url}'.")
+
+
+def _validate_auth_timeout(auth_time: int | None = 0):
     if abs(time() - (auth_time or 0)) > settings.auth_credetials_update_threshold:
         raise HTTPException(
             HTTPStatus.BAD_REQUEST,

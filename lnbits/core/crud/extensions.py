@@ -1,5 +1,3 @@
-from typing import Optional
-
 from lnbits.core.db import db
 from lnbits.core.models.extensions import (
     InstallableExtension,
@@ -10,20 +8,20 @@ from lnbits.db import Connection, Database
 
 async def create_installed_extension(
     ext: InstallableExtension,
-    conn: Optional[Connection] = None,
+    conn: Connection | None = None,
 ) -> None:
     await (conn or db).insert("installed_extensions", ext)
 
 
 async def update_installed_extension(
     ext: InstallableExtension,
-    conn: Optional[Connection] = None,
+    conn: Connection | None = None,
 ) -> None:
     await (conn or db).update("installed_extensions", ext)
 
 
 async def update_installed_extension_state(
-    *, ext_id: str, active: bool, conn: Optional[Connection] = None
+    *, ext_id: str, active: bool, conn: Connection | None = None
 ) -> None:
     await (conn or db).execute(
         """
@@ -34,7 +32,7 @@ async def update_installed_extension_state(
 
 
 async def delete_installed_extension(
-    *, ext_id: str, conn: Optional[Connection] = None
+    *, ext_id: str, conn: Connection | None = None
 ) -> None:
     await (conn or db).execute(
         """
@@ -44,13 +42,14 @@ async def delete_installed_extension(
     )
 
 
-async def drop_extension_db(ext_id: str, conn: Optional[Connection] = None) -> None:
+async def drop_extension_db(ext_id: str, conn: Connection | None = None) -> None:
     row: dict = await (conn or db).fetchone(
         "SELECT * FROM dbversions WHERE db = :id",
         {"id": ext_id},
     )
     # Check that 'ext_id' is a valid extension id and not a malicious string
-    assert row, f"Extension '{ext_id}' db version cannot be found"
+    if not row:
+        raise Exception(f"Extension '{ext_id}' db version cannot be found")
 
     is_file_based_db = await Database.clean_ext_db_files(ext_id)
     if is_file_based_db:
@@ -64,8 +63,8 @@ async def drop_extension_db(ext_id: str, conn: Optional[Connection] = None) -> N
 
 
 async def get_installed_extension(
-    ext_id: str, conn: Optional[Connection] = None
-) -> Optional[InstallableExtension]:
+    ext_id: str, conn: Connection | None = None
+) -> InstallableExtension | None:
     extension = await (conn or db).fetchone(
         "SELECT * FROM installed_extensions WHERE id = :id",
         {"id": ext_id},
@@ -75,13 +74,16 @@ async def get_installed_extension(
 
 
 async def get_installed_extensions(
-    active: Optional[bool] = None,
-    conn: Optional[Connection] = None,
+    active: bool | None = None,
+    conn: Connection | None = None,
 ) -> list[InstallableExtension]:
-    where = "WHERE active = :active" if active is not None else ""
+    query = "SELECT * FROM installed_extensions"
+    if active is not None:
+        query += " WHERE active = :active"
+
     values = {"active": active} if active is not None else {}
     all_extensions = await (conn or db).fetchall(
-        f"SELECT * FROM installed_extensions {where}",
+        query,
         values,
         model=InstallableExtension,
     )
@@ -89,8 +91,8 @@ async def get_installed_extensions(
 
 
 async def get_user_extension(
-    user_id: str, extension: str, conn: Optional[Connection] = None
-) -> Optional[UserExtension]:
+    user_id: str, extension: str, conn: Connection | None = None
+) -> UserExtension | None:
     return await (conn or db).fetchone(
         """
         SELECT * FROM extensions
@@ -102,7 +104,7 @@ async def get_user_extension(
 
 
 async def get_user_extensions(
-    user_id: str, conn: Optional[Connection] = None
+    user_id: str, conn: Connection | None = None
 ) -> list[UserExtension]:
     return await (conn or db).fetchall(
         """SELECT * FROM extensions WHERE "user" = :user""",
@@ -112,20 +114,20 @@ async def get_user_extensions(
 
 
 async def create_user_extension(
-    user_extension: UserExtension, conn: Optional[Connection] = None
+    user_extension: UserExtension, conn: Connection | None = None
 ) -> None:
     await (conn or db).insert("extensions", user_extension)
 
 
 async def update_user_extension(
-    user_extension: UserExtension, conn: Optional[Connection] = None
+    user_extension: UserExtension, conn: Connection | None = None
 ) -> None:
     where = """WHERE extension = :extension AND "user" = :user"""
     await (conn or db).update("extensions", user_extension, where)
 
 
 async def get_user_active_extensions_ids(
-    user_id: str, conn: Optional[Connection] = None
+    user_id: str, conn: Connection | None = None
 ) -> list[str]:
     exts = await (conn or db).fetchall(
         """

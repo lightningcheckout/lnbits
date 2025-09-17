@@ -80,6 +80,11 @@ window.AccountPageLogic = {
         token_id_list: [],
         allRead: false,
         allWrite: false
+      },
+      notifications: {
+        nostr: {
+          identifier: ''
+        }
       }
     }
   },
@@ -90,35 +95,6 @@ window.AccountPageLogic = {
     changeLanguage(newValue) {
       window.i18n.global.locale = newValue
       this.$q.localStorage.set('lnbits.lang', newValue)
-    },
-    toggleGradient() {
-      this.gradientSelection = !this.gradientChoice
-      this.gradientChoice = this.gradientSelection
-      this.$q.localStorage.set('lnbits.backgroundImage', 'none')
-      this.applyGradient()
-      if (!this.gradientChoice) {
-        window.location.reload()
-      }
-    },
-    reactionChoiceFunc() {
-      this.$q.localStorage.set('lnbits.reactions', this.reactionSelection)
-      this.reactionChoice = this.reactionSelection
-    },
-    bgimageChoiceFunc() {
-      this.$q.localStorage.set('lnbits.backgroundImage', this.bgimageSelection)
-      this.bgimageChoice = this.bgimageSelection
-      this.applyBackgroundImage()
-    },
-    themeChoiceFunc(newValue) {
-      this.changeTheme(newValue)
-      this.setColors()
-      if (this.gradientChoice) {
-        this.applyGradient()
-      }
-      if (this.bgimageChoice) {
-        this.applyBackgroundImage()
-      }
-      this.applyBorder()
     },
     async updateAccount() {
       try {
@@ -425,11 +401,8 @@ window.AccountPageLogic = {
       }
     }
   },
+
   async created() {
-    this.borderSelection = this.borderChoice
-    this.reactionSelection = this.reactionChoice
-    this.bgimageSelection = this.bgimageChoice
-    this.themeSelection = this.themeChoice
     try {
       const {data} = await LNbits.api.getAuthenticatedUser()
       this.user = data

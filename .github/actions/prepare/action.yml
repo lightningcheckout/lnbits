@@ -5,9 +5,6 @@ inputs:
     description: "Python Version"
     required: true
     default: "3.10"
-  poetry-version:
-    description: "Poetry Version"
-    default: "1.8.5"
   node-version:
     description: "Node Version"
     default: "20.x"
@@ -24,33 +21,16 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
-        # cache poetry install via pip
-        cache: "pip"
 
-    - name: Set up Poetry ${{ inputs.poetry-version }}
-      uses: abatilo/actions-poetry@v2
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
       with:
-        poetry-version: ${{ inputs.poetry-version }}
-
-    - name: Setup a local virtual environment (if no poetry.toml file)
-      shell: bash
-      run: |
-        poetry config virtualenvs.create true --local
-        poetry config virtualenvs.in-project true --local
-
-    - uses: actions/cache@v4
-      name: Define a cache for the virtual environment based on the dependencies lock file
-      with:
-        path: ./.venv
-        key: venv-${{ hashFiles('poetry.lock') }}
+        enable-cache: true
+        python-version: ${{ inputs.python-version }}
 
     - name: Install the project dependencies
       shell: bash
-      run: |
-        poetry env use python${{ inputs.python-version }}
-        poetry install
-        # needed for conv tests
-        poetry add psycopg2-binary
+      run: uv sync --locked --all-extras --dev
 
     - name: Use Node.js ${{ inputs.node-version }}
       if: ${{ (inputs.npm == 'true') }}

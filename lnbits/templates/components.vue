@@ -5,7 +5,10 @@
     class="lnbits-drawer__q-list"
   >
     <q-item
-      v-for="walletRec in g.user.wallets"
+      v-for="walletRec in g.user.wallets.slice(
+        0,
+        g.user.extra.visible_wallet_count || 10
+      )"
       :key="walletRec.id"
       clickable
       :active="g.wallet && g.wallet.id === walletRec.id"
@@ -43,6 +46,22 @@
       <q-item-section side v-show="g.wallet && g.wallet.id === walletRec.id">
       </q-item-section>
     </q-item>
+    <q-item
+      v-if="g.user.hiddenWalletsCount > 0"
+      clickable
+      @click="goToWallets()"
+    >
+      <q-item-section side>
+        <q-icon name="more_horiz" color="grey-5" size="md"></q-icon>
+      </q-item-section>
+      <q-item-section>
+        <q-item-label
+          lines="1"
+          class="text-caption"
+          v-text="$t('more_count', {count: g.user.hiddenWalletsCount})"
+        ></q-item-label>
+      </q-item-section>
+    </q-item>
     <q-item clickable @click="showForm = !showForm">
       <q-item-section side>
         <q-icon
@@ -55,7 +74,7 @@
         <q-item-label
           lines="1"
           class="text-caption"
-          v-text="$t('add_wallet')"
+          v-text="$t('add_new_wallet')"
         ></q-item-label>
       </q-item-section>
     </q-item>
@@ -178,19 +197,19 @@
           <q-item-label lines="1" v-text="$t('api_watch')"></q-item-label>
         </q-item-section>
       </q-item>
-      <q-item v-if="showPayments" to="/payments">
-        <q-item-section side>
-          <q-icon
-            name="query_stats"
-            :color="isActive('/payments') ? 'primary' : 'grey-5'"
-            size="md"
-          ></q-icon>
-        </q-item-section>
-        <q-item-section>
-          <q-item-label lines="1" v-text="$t('payments')"></q-item-label>
-        </q-item-section>
-      </q-item>
     </div>
+    <q-item to="/payments">
+      <q-item-section side>
+        <q-icon
+          name="query_stats"
+          :color="isActive('/payments') ? 'primary' : 'grey-5'"
+          size="md"
+        ></q-icon>
+      </q-item-section>
+      <q-item-section>
+        <q-item-label lines="1" v-text="$t('payments')"></q-item-label>
+      </q-item-section>
+    </q-item>
     <q-item v-if="showExtensions" to="/extensions">
       <q-item-section side>
         <q-icon
@@ -351,7 +370,12 @@
       v-if="extras.length"
     >
       <template v-for="entry in extras">
-        <q-item v-if="!!entry.value" key="entry.key" class="text-grey-4">
+        <q-item
+          v-if="!!entry.value"
+          key="entry.key"
+          class="text-grey-4"
+          style="white-space: normal; word-break: break-all"
+        >
           <q-item-section>
             <q-item-label v-text="entry.key"></q-item-label>
             <q-item-label caption v-text="entry.value"></q-item-label>
@@ -593,21 +617,83 @@
 </template>
 
 <template id="lnbits-qrcode">
-  <div class="qrcode__wrapper">
-    <qrcode-vue
-      :value="value"
-      level="Q"
-      render-as="svg"
-      :margin="custom.margin"
-      :size="custom.width"
-      class="rounded-borders"
-    ></qrcode-vue>
-    <img
-      v-if="custom.logo"
-      class="qrcode__image"
-      :src="custom.logo"
-      alt="qrcode icon"
-    />
+  <div
+    class="qrcode__outer"
+    :style="`margin: 13px auto; max-width: ${maxWidth}px`"
+  >
+    <div ref="qrWrapper" class="qrcode__wrapper">
+      <a
+        :href="href"
+        :title="href === '' ? value : href"
+        @click="clickQrCode"
+        class="no-link full-width"
+      >
+        <qrcode-vue
+          ref="qrCode"
+          :value="value"
+          :margin="margin"
+          :size="size"
+          level="Q"
+          render-as="svg"
+          class="rounded-borders q-mb-sm"
+        >
+          <q-tooltip :model-value="href === '' ? value : href"></q-tooltip>
+        </qrcode-vue>
+      </a>
+      <img
+        :src="logo"
+        class="qrcode__image"
+        alt="qrcode icon"
+        style="pointer-events: none"
+      />
+    </div>
+    <div
+      v-if="showButtons"
+      class="qrcode__buttons row q-gutter-x-sm"
+      style="justify-content: flex-end"
+    >
+      <q-btn
+        v-if="nfc && nfcSupported"
+        :disabled="nfcTagWriting"
+        flat
+        dense
+        class="text-grey"
+        icon="nfc"
+        @click="writeNfcTag"
+      >
+        <q-tooltip>Write NFC Tag</q-tooltip>
+      </q-btn>
+      <q-btn flat dense class="text-grey" icon="download" @click="downloadSVG">
+        <q-tooltip>Download SVG</q-tooltip>
+      </q-btn>
+      <q-btn
+        flat
+        dense
+        class="text-grey"
+        @click="copyText(value)"
+        icon="content_copy"
+      >
+        <q-tooltip>Copy</q-tooltip>
+      </q-btn>
+    </div>
+  </div>
+</template>
+
+<template id="lnbits-qrcode-lnurl">
+  <div class="qrcode_lnurl__wrapper">
+    <q-tabs
+      v-model="tab"
+      dense
+      class="text-grey"
+      active-color="primary"
+      indicator-color="primary"
+      align="justify"
+      inline-label
+    >
+      <q-tab name="bech32" icon="qr_code" label="bech32"></q-tab>
+      <q-tab name="lud17" icon="link" label="url (lud17)"></q-tab>
+    </q-tabs>
+    <lnbits-qrcode :value="lnurl" nfc="true"></lnbits-qrcode>
   </div>
 </template>
 
@@ -861,14 +947,37 @@
           :props="props"
           style="white-space: normal; word-break: break-all"
         >
-          <q-badge v-if="props.row.tag" color="yellow" text-color="black">
+          <q-icon
+            v-if="
+              props.row.isIn &&
+              props.row.isPending &&
+              props.row.extra.hold_invoice
+            "
+            name="pause_presentation"
+            color="grey"
+            class="cursor-pointer q-mr-sm"
+            @click="showHoldInvoiceDialog(props.row)"
+          >
+            <q-tooltip><span v-text="$t('hold_invoice')"></span></q-tooltip>
+          </q-icon>
+          <q-badge
+            v-if="props.row.tag"
+            color="yellow"
+            text-color="black"
+            class="q-mr-sm"
+          >
             <a
               v-text="'#' + props.row.tag"
               class="inherit"
               :href="['/', props.row.tag].join('')"
             ></a>
           </q-badge>
-          <span class="q-ml-sm" v-text="props.row.memo"></span>
+          <span v-text="props.row.memo"></span>
+          <span
+            class="text-grey-5 q-ml-sm ellipsis"
+            v-if="props.row.extra.internal_memo"
+            v-text="`(${props.row.extra.internal_memo})`"
+          ></span>
           <br />
 
           <i>
@@ -912,7 +1021,7 @@
         </q-td>
         <q-dialog v-model="props.expand" :props="props" position="top">
           <q-card class="q-pa-sm q-pt-xl lnbits__dialog-card">
-            <q-card-section class="">
+            <q-card-section>
               <q-list bordered separator>
                 <q-expansion-item
                   expand-separator
@@ -975,28 +1084,25 @@
                   ></lnbits-payment-details>
                 </q-expansion-item>
               </q-list>
+
               <div
                 v-if="props.row.isIn && props.row.isPending && props.row.bolt11"
-                class="text-center q-my-lg"
               >
-                <a :href="'lightning:' + props.row.bolt11">
+                <div v-if="props.row.extra.fiat_payment_request">
+                  <lnbits-qrcode
+                    :value="props.row.extra.fiat_payment_request"
+                    :href="props.row.extra.fiat_payment_request"
+                    :show-buttons="false"
+                  ></lnbits-qrcode>
+                </div>
+                <div v-else>
                   <lnbits-qrcode
                     :value="'lightning:' + props.row.bolt11.toUpperCase()"
+                    :href="'lightning:' + props.row.bolt11"
                   ></lnbits-qrcode>
-                </a>
+                </div>
               </div>
-            </q-card-section>
-            <q-card-section>
-              <div class="row q-gutter-x-sm">
-                <q-btn
-                  v-if="
-                    props.row.isIn && props.row.isPending && props.row.bolt11
-                  "
-                  outline
-                  color="grey"
-                  @click="copyText(props.row.bolt11)"
-                  :label="$t('copy_invoice')"
-                ></q-btn>
+              <div class="row q-mt-md">
                 <q-btn
                   outline
                   color="grey"
@@ -1012,6 +1118,55 @@
                   :label="$t('close')"
                 ></q-btn>
               </div>
+            </q-card-section>
+          </q-card>
+        </q-dialog>
+        <q-dialog v-model="hodlInvoice.show" position="top">
+          <q-card class="q-pa-sm q-pt-xl lnbits__dialog-card">
+            <q-card-section>
+              <q-item-label class="text-h6">
+                <span v-text="$t('hold_invoice')"></span>
+              </q-item-label>
+              <q-item-label class="text-subtitle2">
+                <span v-text="$t('hold_invoice_description')"></span>
+              </q-item-label>
+            </q-card-section>
+            <q-card-section>
+              <q-input
+                filled
+                :label="$t('preimage')"
+                :hint="$t('preimage_hint')"
+                v-model="hodlInvoice.preimage"
+                dense
+                autofocus
+                @keyup.enter="settleHoldInvoice(hodlInvoice.preimage)"
+              >
+              </q-input>
+            </q-card-section>
+            <q-card-section class="row q-gutter-x-sm">
+              <q-btn
+                @click="settleHoldInvoice(hodlInvoice.preimage)"
+                outline
+                v-close-popup
+                color="grey"
+                :label="$t('settle_invoice')"
+              >
+              </q-btn>
+              <q-btn
+                v-close-popup
+                outline
+                color="grey"
+                class="q-ml-sm"
+                @click="cancelHoldInvoice(hodlInvoice.payment.payment_hash)"
+                :label="$t('cancel_invoice')"
+              ></q-btn>
+              <q-btn
+                v-close-popup
+                flat
+                color="grey"
+                class="q-ml-auto"
+                :label="$t('close')"
+              ></q-btn>
             </q-card-section>
           </q-card>
         </q-dialog>
@@ -1064,9 +1219,13 @@
           :endpoint="endpoint"
         >
           <template v-slot:actions>
-            <q-btn v-close-popup flat color="grey" class="q-ml-auto"
-              >Close</q-btn
-            >
+            <q-btn
+              v-close-popup
+              flat
+              color="grey"
+              class="q-ml-auto"
+              :label="$t('close')"
+            ></q-btn>
           </template>
         </lnbits-extension-settings-form>
       </q-card>
@@ -1122,12 +1281,41 @@
               :type="hideInput ? 'password' : 'text'"
               :label="prop.label"
               :hint="prop.hint"
+              :readonly="prop.readonly || false"
             >
+              <q-btn
+                v-if="prop.copy"
+                @click="copyText(formData[key])"
+                icon="content_copy"
+                class="cursor-pointer"
+                color="grey"
+                flat
+                dense
+              ></q-btn>
+              <q-btn
+                v-if="prop.qrcode"
+                @click="showQRValue(formData[key])"
+                icon="qr_code"
+                class="cursor-pointer"
+                color="grey"
+                flat
+                dense
+              ></q-btn>
             </q-input>
           </div>
         </div>
       </div>
     </q-list>
+    <q-dialog v-model="showQRDialog">
+      <q-card class="q-pa-md">
+        <q-card-section>
+          <lnbits-qrcode :value="qrValue"></lnbits-qrcode>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat :label="$t('close')" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
@@ -1185,7 +1373,7 @@
             color="primary"
             :disable="walletName == ''"
             type="submit"
-            :label="$t('add_wallet')"
+            :label="$t('add_new_wallet')"
             class="full-width q-mb-sm"
           ></q-btn>
           <q-btn
@@ -1453,10 +1641,22 @@
       >
         <q-avatar size="32px" class="q-mr-md">
           <q-img
-            :src="`{{ static_url_for('static', 'images/keycloak-logo.png') }}`"
+            :src="
+              keycloakIcon
+                ? keycloakIcon
+                : `{{ static_url_for('static', 'images/keycloak-logo.png') }}`
+            "
           ></q-img>
         </q-avatar>
-        <div><span v-text="$t('signin_with_keycloak')"></span></div>
+        <div>
+          <span
+            v-text="
+              $t('signin_with_custom_org', {
+                custom_org: keycloakOrg
+              })
+            "
+          ></span>
+        </div>
       </q-btn>
     </div>
   </q-card-section>

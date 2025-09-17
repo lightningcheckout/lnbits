@@ -1,10 +1,11 @@
 import asyncio
 import hashlib
-from typing import AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
 
 import httpx
 from loguru import logger
 
+from lnbits.helpers import normalize_endpoint
 from lnbits.settings import settings
 
 from .base import (
@@ -36,7 +37,7 @@ class LNPayWallet(Wallet):
                 "missing lnpay_wallet_key or lnpay_admin_key"
             )
         self.wallet_key = wallet_key
-        self.endpoint = self.normalize_endpoint(settings.lnpay_api_endpoint)
+        self.endpoint = normalize_endpoint(settings.lnpay_api_endpoint)
 
         headers = {
             "X-Api-Key": settings.lnpay_api_key,
@@ -73,12 +74,12 @@ class LNPayWallet(Wallet):
     async def create_invoice(
         self,
         amount: int,
-        memo: Optional[str] = None,
-        description_hash: Optional[bytes] = None,
-        unhashed_description: Optional[bytes] = None,
+        memo: str | None = None,
+        description_hash: bytes | None = None,
+        unhashed_description: bytes | None = None,
         **_,
     ) -> InvoiceResponse:
-        data: Dict = {"num_satoshis": f"{amount}"}
+        data: dict = {"num_satoshis": f"{amount}"}
         if description_hash:
             data["description_hash"] = description_hash.hex()
         elif unhashed_description:

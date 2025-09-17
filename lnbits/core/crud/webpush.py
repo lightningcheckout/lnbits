@@ -1,5 +1,3 @@
-from typing import Optional
-
 from lnbits.core.db import db
 
 from ..models import WebPushSubscription
@@ -7,7 +5,7 @@ from ..models import WebPushSubscription
 
 async def get_webpush_subscription(
     endpoint: str, user: str
-) -> Optional[WebPushSubscription]:
+) -> WebPushSubscription | None:
     return await db.fetchone(
         """
         SELECT * FROM webpush_subscriptions
@@ -37,7 +35,8 @@ async def create_webpush_subscription(
         {"endpoint": endpoint, "user": user, "data": data, "host": host},
     )
     subscription = await get_webpush_subscription(endpoint, user)
-    assert subscription, "Newly created webpush subscription couldn't be retrieved"
+    if not subscription:
+        raise ValueError("Newly created webpush subscription couldn't be retrieved")
     return subscription
 
 

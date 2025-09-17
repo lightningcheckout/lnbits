@@ -1,6 +1,5 @@
 from base64 import b64decode, b64encode, urlsafe_b64decode, urlsafe_b64encode
 from hashlib import md5, pbkdf2_hmac, sha256
-from typing import Union
 
 from Cryptodome import Random
 from Cryptodome.Cipher import AES
@@ -40,7 +39,7 @@ class AESCipher:
     AES.decrypt(encrypted, password).toString(Utf8);
     """
 
-    def __init__(self, key: Union[bytes, str], block_size: int = 16):
+    def __init__(self, key: bytes | str, block_size: int = 16):
         self.block_size = block_size
         if isinstance(key, bytes):
             self.key = key
@@ -56,16 +55,18 @@ class AESCipher:
         return data + (chr(length) * length).encode()
 
     def unpad(self, data: bytes) -> bytes:
-        _last = data[-1]
-        if isinstance(_last, int):
-            return data[:-_last]
-        return data[: -ord(_last)]
+        padding = data[-1]
+        # Ensure padding is within valid range else there is no padding
+        if padding <= 0 or padding >= self.block_size:
+            return data
+        return data[:-padding]
 
     def derive_iv_and_key(
         self, salt: bytes, output_len: int = 32 + 16
     ) -> tuple[bytes, bytes]:
         # extended from https://gist.github.com/gsakkis/4546068
-        assert len(salt) == 8, "Salt must be 8 bytes"
+        if len(salt) != 8:
+            raise ValueError("Salt must be 8 bytes")
         data = self.key + salt
         key = md5(data).digest()
         final_key = key
@@ -93,9 +94,17 @@ class AESCipher:
 
         try:
             decrypted_bytes = aes.decrypt(encrypted_bytes)
-            return self.unpad(decrypted_bytes).decode()
         except Exception as exc:
-            raise ValueError("Decryption error") from exc
+            raise ValueError("Could not decrypt payload") from exc
+
+        unpadded = self.unpad(decrypted_bytes)
+        if len(unpadded) == 0:
+            raise ValueError("Unpadding resulted in empty data.")
+
+        try:
+            return unpadded.decode()
+        except UnicodeDecodeError as exc:
+            raise ValueError("Decryption resulted in invalid UTF-8 data.") from exc
 
     def encrypt(self, message: bytes, urlsafe: bool = False) -> str:
         """

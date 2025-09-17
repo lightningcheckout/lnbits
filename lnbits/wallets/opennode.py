@@ -1,9 +1,11 @@
 import asyncio
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 import httpx
 from loguru import logger
 
+from lnbits.exceptions import UnsupportedError
+from lnbits.helpers import normalize_endpoint
 from lnbits.settings import settings
 
 from .base import (
@@ -12,7 +14,6 @@ from .base import (
     PaymentResponse,
     PaymentStatus,
     StatusResponse,
-    UnsupportedError,
     Wallet,
 )
 
@@ -38,7 +39,7 @@ class OpenNodeWallet(Wallet):
             )
         self.key = key
 
-        self.endpoint = self.normalize_endpoint(settings.opennode_api_endpoint)
+        self.endpoint = normalize_endpoint(settings.opennode_api_endpoint)
 
         headers = {
             "Authorization": self.key,
@@ -69,9 +70,9 @@ class OpenNodeWallet(Wallet):
     async def create_invoice(
         self,
         amount: int,
-        memo: Optional[str] = None,
-        description_hash: Optional[bytes] = None,
-        unhashed_description: Optional[bytes] = None,
+        memo: str | None = None,
+        description_hash: bytes | None = None,
+        unhashed_description: bytes | None = None,
         **_,
     ) -> InvoiceResponse:
         if description_hash or unhashed_description:

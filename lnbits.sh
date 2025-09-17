@@ -6,17 +6,16 @@ if [ ! -d lnbits/data ]; then
   # Update package list and install prerequisites non-interactively
   sudo apt update -y
   sudo apt install -y software-properties-common
-  
+
   # Add the deadsnakes PPA repository non-interactively
   sudo add-apt-repository -y ppa:deadsnakes/ppa
-  
-  # Install Python 3.9 and distutils non-interactively
-  sudo apt install -y python3.9 python3.9-distutils
 
-  # Install Poetry
-  curl -sSL https://install.python-poetry.org | python3.9 -
+  # Install Python 3.10 and distutils non-interactively
+  sudo apt install -y python3.10 python3.10-distutils
 
-  # Add Poetry to PATH for the current session
+  # Install UV
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
   export PATH="/home/$USER/.local/bin:$PATH"
 
   if [ ! -d lnbits/wallets ]; then
@@ -42,13 +41,13 @@ elif [ ! -d lnbits/wallets ]; then
   cd lnbits || { echo "Failed to cd into lnbits ... FAIL"; exit 1; }
 fi
 
-# Install the dependencies using Poetry
-poetry env use python3.9
-poetry install --only main
+# Install the dependencies using UV
+uv sync --all-extras
+
 
 # Set environment variables for LNbits
 export LNBITS_ADMIN_UI=true
 export HOST=0.0.0.0
 
 # Run LNbits
-poetry run lnbits
+uv run lnbits

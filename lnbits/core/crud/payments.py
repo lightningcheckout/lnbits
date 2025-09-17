@@ -1,5 +1,5 @@
 from time import time
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from lnbits.core.crud.wallets import get_total_balance, get_wallet, get_wallets_ids
 from lnbits.core.db import db
@@ -23,7 +23,7 @@ def update_payment_extra():
     pass
 
 
-async def get_payment(checking_id: str, conn: Optional[Connection] = None) -> Payment:
+async def get_payment(checking_id: str, conn: Connection | None = None) -> Payment:
     return await (conn or db).fetchone(
         "SELECT * FROM apipayments WHERE checking_id = :checking_id",
         {"checking_id": checking_id},
@@ -33,10 +33,10 @@ async def get_payment(checking_id: str, conn: Optional[Connection] = None) -> Pa
 
 async def get_standalone_payment(
     checking_id_or_hash: str,
-    conn: Optional[Connection] = None,
-    incoming: Optional[bool] = False,
-    wallet_id: Optional[str] = None,
-) -> Optional[Payment]:
+    conn: Connection | None = None,
+    incoming: bool | None = False,
+    wallet_id: str | None = None,
+) -> Payment | None:
     clause: str = "checking_id = :checking_id OR payment_hash = :hash"
     values = {
         "wallet_id": wallet_id,
@@ -50,11 +50,13 @@ async def get_standalone_payment(
         clause = f"({clause}) AND wallet_id = :wallet_id"
 
     row = await (conn or db).fetchone(
+        # This query is safe from SQL injection
+        # The `clause` is constructed from sanitized inputs
         f"""
         SELECT * FROM apipayments
         WHERE {clause}
         ORDER BY amount LIMIT 1
-        """,
+        """,  # noqa: S608
         values,
         Payment,
     )
@@ -62,8 +64,8 @@ async def get_standalone_payment(
 
 
 async def get_wallet_payment(
-    wallet_id: str, payment_hash: str, conn: Optional[Connection] = None
-) -> Optional[Payment]:
+    wallet_id: str, payment_hash: str, conn: Connection | None = None
+) -> Payment | None:
     payment = await (conn or db).fetchone(
         """
         SELECT *
@@ -80,31 +82,37 @@ async def get_latest_payments_by_extension(
     ext_name: str, ext_id: str, limit: int = 5
 ) -> list[Payment]:
     return await db.fetchall(
+        # This query is safe from SQL injection
+        # The limtit is an integer and not user input
         f"""
         SELECT * FROM apipayments
-        WHERE status = '{PaymentState.SUCCESS}'
+        WHERE status = :status
         AND extra LIKE :ext_name
         AND extra LIKE :ext_id
         ORDER BY time DESC LIMIT {int(limit)}
-        """,
-        {"ext_name": f"%{ext_name}%", "ext_id": f"%{ext_id}%"},
+        """,  # noqa: S608
+        {
+            "status": f"{PaymentState.SUCCESS}",
+            "ext_name": f"%{ext_name}%",
+            "ext_id": f"%{ext_id}%",
+        },
         Payment,
     )
 
 
-async def get_payments_paginated(
+async def get_payments_paginated(  # noqa: C901
     *,
-    wallet_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    wallet_id: str | None = None,
+    user_id: str | None = None,
     complete: bool = False,
     pending: bool = False,
     failed: bool = False,
     outgoing: bool = False,
     incoming: bool = False,
-    since: Optional[int] = None,
+    since: int | None = None,
     exclude_uncheckable: bool = False,
-    filters: Optional[Filters[PaymentFilters]] = None,
-    conn: Optional[Connection] = None,
+    filters: Filters[PaymentFilters] | None = None,
+    conn: Connection | None = None,
 ) -> Page[Payment]:
     """
     Filters payments to be returned by:
@@ -123,12 +131,8 @@ async def get_payments_paginated(
         values["wallet_id"] = wallet_id
         clause.append("wallet_id = :wallet_id")
     elif user_id:
-        wallet_ids = await get_wallets_ids(user_id=user_id, conn=conn) or [
-            "no-wallets-for-user"
-        ]
-        # wallet ids are safe to use in sql queries
-        wallet_ids_str = [f"'{w}'" for w in wallet_ids]
-        clause.append(f""" wallet_id IN ({", ".join(wallet_ids_str)}) """)
+        only_user_wallets = await _only_user_wallets_statement(user_id, conn=conn)
+        clause.append(only_user_wallets)
 
     if complete and pending:
         clause.append(
@@ -172,17 +176,17 @@ async def get_payments_paginated(
 
 async def get_payments(
     *,
-    wallet_id: Optional[str] = None,
+    wallet_id: str | None = None,
     complete: bool = False,
     pending: bool = False,
     outgoing: bool = False,
     incoming: bool = False,
-    since: Optional[int] = None,
+    since: int | None = None,
     exclude_uncheckable: bool = False,
-    filters: Optional[Filters[PaymentFilters]] = None,
-    conn: Optional[Connection] = None,
-    limit: Optional[int] = None,
-    offset: Optional[int] = None,
+    filters: Filters[PaymentFilters] | None = None,
+    conn: Connection | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
 ) -> list[Payment]:
     """
     Filters payments to be returned by complete | pending | outgoing | incoming.
@@ -226,26 +230,28 @@ async def get_payments_status_count() -> PaymentsStatusCount:
 
 
 async def delete_expired_invoices(
-    conn: Optional[Connection] = None,
+    conn: Connection | None = None,
 ) -> None:
     # first we delete all invoices older than one month
 
     await (conn or db).execute(
+        # Timestamp placeholder is safe from SQL injection (not user input)
         f"""
         DELETE FROM apipayments
-        WHERE status = '{PaymentState.PENDING}' AND amount > 0
+        WHERE status = :status AND amount > 0
         AND time < {db.timestamp_placeholder("delta")}
-        """,
-        {"delta": int(time() - 2592000)},
+        """,  # noqa: S608
+        {"status": f"{PaymentState.PENDING}", "delta": int(time() - 2592000)},
     )
     # then we delete all invoices whose expiry date is in the past
     await (conn or db).execute(
+        # Timestamp placeholder is safe from SQL injection (not user input)
         f"""
         DELETE FROM apipayments
-        WHERE status = '{PaymentState.PENDING}' AND amount > 0
+        WHERE status = :status AND amount > 0
         AND expiry < {db.timestamp_placeholder("now")}
-        """,
-        {"now": int(time())},
+        """,  # noqa: S608
+        {"status": f"{PaymentState.PENDING}", "now": int(time())},
     )
 
 
@@ -253,12 +259,13 @@ async def create_payment(
     checking_id: str,
     data: CreatePayment,
     status: PaymentState = PaymentState.PENDING,
-    conn: Optional[Connection] = None,
+    conn: Connection | None = None,
 ) -> Payment:
     # we don't allow the creation of the same invoice twice
     # note: this can be removed if the db uniqueness constraints are set appropriately
     previous_payment = await get_standalone_payment(checking_id, conn=conn)
-    assert previous_payment is None, "Payment already exists"
+    if previous_payment is not None:
+        raise ValueError("Payment already exists")
     extra = data.extra or {}
 
     payment = Payment(
@@ -272,7 +279,7 @@ async def create_payment(
         preimage=data.preimage,
         expiry=data.expiry,
         webhook=data.webhook,
-        fee=data.fee,
+        fee=-abs(data.fee),
         tag=extra.get("tag", None),
         extra=extra,
     )
@@ -283,7 +290,7 @@ async def create_payment(
 
 
 async def update_payment_checking_id(
-    checking_id: str, new_checking_id: str, conn: Optional[Connection] = None
+    checking_id: str, new_checking_id: str, conn: Connection | None = None
 ) -> None:
     await (conn or db).execute(
         "UPDATE apipayments SET checking_id = :new_id WHERE checking_id = :old_id",
@@ -293,8 +300,8 @@ async def update_payment_checking_id(
 
 async def update_payment(
     payment: Payment,
-    new_checking_id: Optional[str] = None,
-    conn: Optional[Connection] = None,
+    new_checking_id: str | None = None,
+    conn: Connection | None = None,
 ) -> None:
     await (conn or db).update(
         "apipayments", payment, "WHERE checking_id = :checking_id"
@@ -304,9 +311,9 @@ async def update_payment(
 
 
 async def get_payments_history(
-    wallet_id: Optional[str] = None,
+    wallet_id: str | None = None,
     group: DateTrunc = "day",
-    filters: Optional[Filters] = None,
+    filters: Filters | None = None,
 ) -> list[PaymentHistoryPoint]:
     if not filters:
         filters = Filters()
@@ -325,16 +332,20 @@ async def get_payments_history(
         )
         """
     ]
+    clause = filters.where(where)
     transactions: list[dict] = await db.fetchall(
+        # This query is safe from SQL injection:
+        # - `date_trunc` is a static string, not user input
+        # - `clause` is generated from filters, which are validated and sanitized
         f"""
         SELECT {date_trunc} date,
                SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) income,
                SUM(CASE WHEN amount < 0 THEN abs(amount) + abs(fee) ELSE 0 END) spending
         FROM apipayments
-        {filters.where(where)}
+        {clause}
         GROUP BY date
         ORDER BY date DESC
-        """,
+        """,  # noqa: S608
         filters.values(values),
     )
     if wallet_id:
@@ -365,21 +376,31 @@ async def get_payments_history(
 
 async def get_payment_count_stats(
     field: PaymentCountField,
-    filters: Optional[Filters[PaymentFilters]] = None,
-    conn: Optional[Connection] = None,
+    filters: Filters[PaymentFilters] | None = None,
+    user_id: str | None = None,
+    conn: Connection | None = None,
 ) -> list[PaymentCountStat]:
 
     if not filters:
         filters = Filters()
-    clause = filters.where()
+    extra_stmts = []
+
+    if user_id:
+        only_user_wallets = await _only_user_wallets_statement(user_id, conn=conn)
+        extra_stmts.append(only_user_wallets)
+
+    clause = filters.where(extra_stmts)
     data = await (conn or db).fetchall(
+        # SQL injection vectors safety:
+        # - `field` is a static string, not user input
+        # - `clause` is generated from filters, which are validated and sanitized
         query=f"""
             SELECT {field} as field, count(*) as total
             FROM apipayments
             {clause}
             GROUP BY {field}
             ORDER BY {field}
-        """,
+        """,  # noqa: S608
         values=filters.values(),
         model=PaymentCountStat,
     )
@@ -388,19 +409,27 @@ async def get_payment_count_stats(
 
 
 async def get_daily_stats(
-    filters: Optional[Filters[PaymentFilters]] = None,
-    conn: Optional[Connection] = None,
-) -> Tuple[list[PaymentDailyStats], list[PaymentDailyStats]]:
+    filters: Filters[PaymentFilters] | None = None,
+    user_id: str | None = None,
+    conn: Connection | None = None,
+) -> tuple[list[PaymentDailyStats], list[PaymentDailyStats]]:
 
     if not filters:
         filters = Filters()
 
-    in_clause = filters.where(
-        ["(apipayments.status = 'success' AND apipayments.amount > 0)"]
-    )
-    out_clause = filters.where(
-        ["(apipayments.status IN ('success', 'pending') AND apipayments.amount < 0)"]
-    )
+    in_where_stmts = ["(apipayments.status = 'success' AND apipayments.amount > 0)"]
+    out_where_stmts = [
+        "(apipayments.status IN ('success', 'pending') AND apipayments.amount < 0)"
+    ]
+
+    if user_id:
+        only_user_wallets = await _only_user_wallets_statement(user_id, conn=conn)
+        in_where_stmts.append(only_user_wallets)
+        out_where_stmts.append(only_user_wallets)
+
+    in_clause = filters.where(in_where_stmts)
+    out_clause = filters.where(out_where_stmts)
+
     date_trunc = db.datetime_grouping("day")
     query = """
         SELECT {date_trunc} date,
@@ -430,8 +459,9 @@ async def get_daily_stats(
 
 
 async def get_wallets_stats(
-    filters: Optional[Filters[PaymentFilters]] = None,
-    conn: Optional[Connection] = None,
+    filters: Filters[PaymentFilters] | None = None,
+    user_id: str | None = None,
+    conn: Connection | None = None,
 ) -> list[PaymentWalletStats]:
 
     if not filters:
@@ -449,9 +479,15 @@ async def get_wallets_stats(
         )
         """,
     ]
+    if user_id:
+        only_user_wallets = await _only_user_wallets_statement(user_id, conn=conn)
+        where_stmts.append(only_user_wallets)
+
     clauses = filters.where(where_stmts)
 
     data = await (conn or db).fetchall(
+        # This query is safe from SQL injection
+        # The `clauses` is constructed from sanitized inputs
         query=f"""
             SELECT apipayments.wallet_id,
                     MAX(wallets.name) AS wallet_name,
@@ -463,7 +499,7 @@ async def get_wallets_stats(
             {clauses}
             GROUP BY apipayments.wallet_id
             ORDER BY payments_count
-        """,
+        """,  # noqa: S608
         values=filters.values(),
         model=PaymentWalletStats,
     )
@@ -472,7 +508,7 @@ async def get_wallets_stats(
 
 
 async def delete_wallet_payment(
-    checking_id: str, wallet_id: str, conn: Optional[Connection] = None
+    checking_id: str, wallet_id: str, conn: Connection | None = None
 ) -> None:
     await (conn or db).execute(
         "DELETE FROM apipayments WHERE checking_id = :checking_id AND wallet = :wallet",
@@ -481,24 +517,24 @@ async def delete_wallet_payment(
 
 
 async def check_internal(
-    payment_hash: str, conn: Optional[Connection] = None
-) -> Optional[Payment]:
+    payment_hash: str, conn: Connection | None = None
+) -> Payment | None:
     """
     Returns the checking_id of the internal payment if it exists,
     otherwise None
     """
     return await (conn or db).fetchone(
-        f"""
+        """
         SELECT * FROM apipayments
-        WHERE payment_hash = :hash AND status = '{PaymentState.PENDING}' AND amount > 0
+        WHERE payment_hash = :hash AND status = :status AND amount > 0
         """,
-        {"hash": payment_hash},
+        {"status": f"{PaymentState.PENDING}", "hash": payment_hash},
         Payment,
     )
 
 
 async def is_internal_status_success(
-    payment_hash: str, conn: Optional[Connection] = None
+    payment_hash: str, conn: Connection | None = None
 ) -> bool:
     """
     Returns True if the internal payment was found and is successful,
@@ -524,3 +560,14 @@ async def mark_webhook_sent(payment_hash: str, status: str) -> None:
         """,
         {"status": status, "hash": payment_hash},
     )
+
+
+async def _only_user_wallets_statement(
+    user_id: str, conn: Connection | None = None
+) -> str:
+    wallet_ids = await get_wallets_ids(user_id=user_id, conn=conn) or [
+        "no-wallets-for-user"
+    ]
+    # wallet ids are safe to use in sql queries
+    wallet_ids_str = [f"'{w}'" for w in wallet_ids]
+    return f""" wallet_id IN ({", ".join(wallet_ids_str)}) """

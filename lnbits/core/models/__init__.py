@@ -1,5 +1,5 @@
 from .audit import AuditEntry, AuditFilters
-from .lnurl import CreateLnurl, CreateLnurlAuth, PayLnurlWData
+from .lnurl import CreateLnurlPayment, CreateLnurlWithdraw
 from .misc import (
     BalanceDelta,
     Callback,
@@ -9,6 +9,7 @@ from .misc import (
     SimpleStatus,
 )
 from .payments import (
+    CancelInvoice,
     CreateInvoice,
     CreatePayment,
     DecodePayment,
@@ -23,6 +24,7 @@ from .payments import (
     PaymentsStatusCount,
     PaymentState,
     PaymentWalletStats,
+    SettleInvoice,
 )
 from .tinyurl import TinyURL
 from .users import (
@@ -48,62 +50,55 @@ from .wallets import BaseWallet, CreateWallet, KeyType, Wallet, WalletTypeInfo
 from .webpush import CreateWebPushSubscription, WebPushSubscription
 
 __all__ = [
-    # audit
+    "AccessTokenPayload",
+    "Account",
+    "AccountFilters",
+    "AccountOverview",
     "AuditEntry",
     "AuditFilters",
-    # lnurl
-    "CreateLnurl",
-    "CreateLnurlAuth",
-    "PayLnurlWData",
-    # misc
     "BalanceDelta",
+    "BaseWallet",
     "Callback",
+    "CancelInvoice",
     "ConversionData",
     "CoreAppExtra",
-    "DbVersion",
-    "SimpleStatus",
-    # payments
     "CreateInvoice",
+    "CreateLnurlPayment",
+    "CreateLnurlWithdraw",
     "CreatePayment",
+    "CreateUser",
+    "CreateWallet",
+    "CreateWebPushSubscription",
+    "DbVersion",
     "DecodePayment",
+    "KeyType",
+    "LoginUsernamePassword",
+    "LoginUsr",
     "PayInvoice",
     "Payment",
     "PaymentCountField",
     "PaymentCountStat",
     "PaymentDailyStats",
-    "PaymentsStatusCount",
-    "PaymentWalletStats",
     "PaymentExtra",
     "PaymentFilters",
     "PaymentHistoryPoint",
     "PaymentState",
-    # tinyurl
-    "TinyURL",
-    # users
-    "AccessTokenPayload",
-    "Account",
-    "AccountFilters",
-    "AccountOverview",
-    "UserAcls",
-    "CreateUser",
+    "PaymentWalletStats",
+    "PaymentsStatusCount",
     "RegisterUser",
-    "LoginUsernamePassword",
-    "LoginUsr",
     "ResetUserPassword",
+    "SettleInvoice",
+    "SimpleStatus",
+    "TinyURL",
     "UpdateBalance",
     "UpdateSuperuserPassword",
     "UpdateUser",
     "UpdateUserPassword",
     "UpdateUserPubkey",
     "User",
+    "UserAcls",
     "UserExtra",
-    # wallets
-    "BaseWallet",
-    "CreateWallet",
-    "KeyType",
     "Wallet",
     "WalletTypeInfo",
-    # webpush
-    "CreateWebPushSubscription",
     "WebPushSubscription",
 ]

@@ -3,16 +3,30 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
+from bcrypt import checkpw, gensalt, hashpw
 from fastapi import Query
-from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 
 from lnbits.core.models.misc import SimpleItem
 from lnbits.db import FilterModel
-from lnbits.helpers import is_valid_email_address, is_valid_pubkey, is_valid_username
+from lnbits.helpers import (
+    is_valid_email_address,
+    is_valid_external_id,
+    is_valid_pubkey,
+    is_valid_username,
+)
 from lnbits.settings import settings
 
 from .wallets import Wallet
+
+
+class UserNotifications(BaseModel):
+    nostr_identifier: str | None = None
+    telegram_chat_id: str | None = None
+    email_address: str | None = None
+    excluded_wallets: list[str] = []
+    outgoing_payments_sats: int = 0
+    incoming_payments_sats: int = 0
 
 
 class UserExtra(BaseModel):
@@ -26,6 +40,11 @@ class UserExtra(BaseModel):
     # - "lnbits": the user was created via register form (username/pass or user_id only)
     # - "google | github | ...": the user was created using an SSO provider
     provider: str | None = "lnbits"  # auth provider
+
+    # how many wallets are shown in the user interface
+    visible_wallet_count: int | None = 10
+
+    notifications: UserNotifications = UserNotifications()
 
 
 class EndpointAccess(BaseModel):
@@ -90,6 +109,7 @@ class UserAcls(BaseModel):
 
 class Account(BaseModel):
     id: str
+    external_id: str | None = None  # for external account linking
     username: str | None = None
     password_hash: str | None = None
     pubkey: str | None = None
@@ -101,24 +121,28 @@ class Account(BaseModel):
 
     is_super_user: bool = Field(default=False, no_database=True)
     is_admin: bool = Field(default=False, no_database=True)
+    fiat_providers: list[str] = Field(default=[], no_database=True)
 
     def __init__(self, **data):
         super().__init__(**data)
         self.is_super_user = settings.is_super_user(self.id)
         self.is_admin = settings.is_admin_user(self.id)
+        self.fiat_providers = settings.get_fiat_providers_for_user(self.id)
 
     def hash_password(self, password: str) -> str:
         """sets and returns the hashed password"""
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        self.password_hash = pwd_context.hash(password)
+        salt = gensalt()
+        hashed_pw = hashpw(password.encode(), salt)
+        if not hashed_pw:
+            raise ValueError("Password hashing failed.")
+        self.password_hash = hashed_pw.decode()
         return self.password_hash
 
     def verify_password(self, password: str) -> bool:
         """returns True if the password matches the hash"""
         if not self.password_hash:
             return False
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        return pwd_context.verify(password, self.password_hash)
+        return checkpw(password.encode(), self.password_hash.encode())
 
     def validate_fields(self):
         if self.username and not is_valid_username(self.username):
@@ -127,6 +151,11 @@ class Account(BaseModel):
             raise ValueError("Invalid email.")
         if self.pubkey and not is_valid_pubkey(self.pubkey):
             raise ValueError("Invalid pubkey.")
+        if self.external_id and not is_valid_external_id(self.external_id):
+            raise ValueError(
+                "Invalid external id. Max length is 256 characters. "
+                "Space and newlines are not allowed."
+            )
         user_uuid4 = UUID(hex=self.id, version=4)
         if user_uuid4.hex != self.id:
             raise ValueError("User ID is not valid UUID4 hex string.")
@@ -140,7 +169,14 @@ class AccountOverview(Account):
 
 
 class AccountFilters(FilterModel):
-    __search_fields__ = ["user", "email", "username", "pubkey", "wallet_id"]
+    __search_fields__ = [
+        "user",
+        "email",
+        "username",
+        "pubkey",
+        "external_id",
+        "wallet_id",
+    ]
     __sort_fields__ = [
         "balance_msat",
         "email",
@@ -154,6 +190,7 @@ class AccountFilters(FilterModel):
     user: str | None = None
     username: str | None = None
     pubkey: str | None = None
+    external_id: str | None = None
     wallet_id: str | None = None
 
 
@@ -164,10 +201,12 @@ class User(BaseModel):
     email: str | None = None
     username: str | None = None
     pubkey: str | None = None
+    external_id: str | None = None  # for external account linking
     extensions: list[str] = []
     wallets: list[Wallet] = []
     admin: bool = False
     super_user: bool = False
+    fiat_providers: list[str] = []
     has_password: bool = False
     extra: UserExtra = UserExtra()
 
@@ -204,13 +243,13 @@ class CreateUser(BaseModel):
     password: str | None = Query(default=None, min_length=8, max_length=50)
     password_repeat: str | None = Query(default=None, min_length=8, max_length=50)
     pubkey: str = Query(default=None, max_length=64)
+    external_id: str = Query(default=None, max_length=256)
     extensions: list[str] | None = None
     extra: UserExtra | None = None
 
 
 class UpdateUser(BaseModel):
     user_id: str
-    email: str | None = Query(default=None)
     username: str | None = Query(default=..., min_length=2, max_length=20)
     extra: UserExtra | None = None
 

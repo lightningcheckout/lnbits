@@ -1,11 +1,12 @@
 import asyncio
 import hashlib
 import json
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from loguru import logger
 from websocket import create_connection
 
+from lnbits.helpers import normalize_endpoint
 from lnbits.settings import settings
 
 from .base import (
@@ -25,7 +26,7 @@ class ClicheWallet(Wallet):
         if not settings.cliche_endpoint:
             raise ValueError("cannot initialize ClicheWallet: missing cliche_endpoint")
 
-        self.endpoint = self.normalize_endpoint(settings.cliche_endpoint)
+        self.endpoint = normalize_endpoint(settings.cliche_endpoint)
 
     async def cleanup(self):
         pass
@@ -51,9 +52,9 @@ class ClicheWallet(Wallet):
     async def create_invoice(
         self,
         amount: int,
-        memo: Optional[str] = None,
-        description_hash: Optional[bytes] = None,
-        unhashed_description: Optional[bytes] = None,
+        memo: str | None = None,
+        description_hash: bytes | None = None,
+        unhashed_description: bytes | None = None,
         **_,
     ) -> InvoiceResponse:
         if unhashed_description or description_hash:
@@ -180,7 +181,8 @@ class ClicheWallet(Wallet):
                     try:
                         if data["result"]["status"]:
                             yield data["result"]["payment_hash"]
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug(exc)
                         continue
             except Exception as exc:
                 logger.error(

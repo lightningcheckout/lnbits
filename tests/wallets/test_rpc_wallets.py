@@ -1,5 +1,4 @@
 import importlib
-from typing import Dict, List, Optional
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -93,7 +92,7 @@ def _check_calls(expected_calls):
 
 
 def _spy_mocks(mocker: MockerFixture, test_data: WalletTest, wallet: BaseWallet):
-    expected_calls: Dict[str, List] = {}
+    expected_calls: dict[str, list] = {}
     for mock in test_data.mocks:
         client_field = getattr(wallet, mock.name)
         spy = _spy_mock(mocker, mock, client_field)
@@ -104,7 +103,7 @@ def _spy_mocks(mocker: MockerFixture, test_data: WalletTest, wallet: BaseWallet)
 
 def _spy_mock(mocker: MockerFixture, mock: RpcMock, client_field):
 
-    expected_calls: Dict[str, List] = {}
+    expected_calls: dict[str, list] = {}
     assert isinstance(mock.response, dict), "Expected data RPC response"
     for field_name in mock.response:
         value = mock.response[field_name]
@@ -167,7 +166,7 @@ def _mock_field(field):
     return response
 
 
-def _eval_dict(data: Optional[dict]) -> Optional[dict]:
+def _eval_dict(data: dict | None) -> dict | None:
     fn_prefix = "__eval__:"
     if not data:
         return data
@@ -190,7 +189,7 @@ def _eval_dict(data: Optional[dict]) -> Optional[dict]:
     return d
 
 
-def _dict_to_object(data: Optional[dict]) -> Optional[DataObject]:
+def _dict_to_object(data: dict | None) -> DataObject | None:
     if not data:
         return None
     # if isinstance(data, list):
@@ -213,7 +212,7 @@ def _data_mock(data: dict) -> Mock:
     return Mock(return_value=_dict_to_object(data))
 
 
-def _raise(error: Optional[dict]):
+def _raise(error: dict | None):
     if not error:
         return Exception()
     data = error["data"] if "data" in error else None

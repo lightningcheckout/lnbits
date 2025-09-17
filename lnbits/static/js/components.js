@@ -103,14 +103,7 @@ window.app.component('lnbits-extension-list', {
 window.app.component('lnbits-manage', {
   mixins: [window.windowMixin],
   template: '#lnbits-manage',
-  props: [
-    'showAdmin',
-    'showNode',
-    'showExtensions',
-    'showUsers',
-    'showAudit',
-    'showPayments'
-  ],
+  props: ['showAdmin', 'showNode', 'showExtensions', 'showUsers', 'showAudit'],
   methods: {
     isActive(path) {
       return window.location.pathname === path
@@ -191,34 +184,6 @@ window.app.component('lnbits-lnurlpay-success-action', {
         this.decryptedValue = value
       }
     )
-  }
-})
-
-window.app.component('lnbits-qrcode', {
-  mixins: [window.windowMixin],
-  template: '#lnbits-qrcode',
-  components: {
-    QrcodeVue
-  },
-  props: {
-    value: {
-      type: String,
-      required: true
-    },
-    options: Object
-  },
-  data() {
-    return {
-      custom: {
-        margin: 3,
-        width: 350,
-        size: 350,
-        logo: LNBITS_QR_LOGO
-      }
-    }
-  },
-  created() {
-    this.custom = {...this.custom, ...this.options}
   }
 })
 
@@ -566,7 +531,9 @@ window.app.component('username-password', {
       username: this.userName,
       password: this.password_1,
       passwordRepeat: this.password_2,
-      reset_key: this.resetKey
+      reset_key: this.resetKey,
+      keycloakOrg: LNBITS_AUTH_KEYCLOAK_ORG || 'Keycloak',
+      keycloakIcon: LNBITS_AUTH_KEYCLOAK_ICON
     }
   },
   methods: {

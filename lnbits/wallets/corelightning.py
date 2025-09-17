@@ -1,18 +1,20 @@
 import asyncio
-import random
 from collections.abc import AsyncGenerator
-from typing import Any, Optional
+from secrets import token_urlsafe
+from typing import Any
 
 from bolt11.decode import decode as bolt11_decode
 from bolt11.exceptions import Bolt11Exception
 from loguru import logger
 from pyln.client import LightningRpc, RpcError
 
+from lnbits.exceptions import UnsupportedError
 from lnbits.nodes.cln import CoreLightningNode
 from lnbits.settings import settings
 from lnbits.utils.crypto import random_secret_and_hash
 
 from .base import (
+    Feature,
     InvoiceResponse,
     PaymentFailedStatus,
     PaymentPendingStatus,
@@ -20,7 +22,6 @@ from .base import (
     PaymentStatus,
     PaymentSuccessStatus,
     StatusResponse,
-    UnsupportedError,
     Wallet,
 )
 
@@ -31,12 +32,16 @@ async def run_sync(func) -> Any:
 
 
 class CoreLightningWallet(Wallet):
+    """Core Lightning RPC implementation."""
+
     __node_cls__ = CoreLightningNode
+    features = [Feature.nodemanager]
 
     async def cleanup(self):
         pass
 
     def __init__(self):
+
         rpc = settings.corelightning_rpc or settings.clightning_rpc
         if not rpc:
             raise ValueError(
@@ -87,12 +92,12 @@ class CoreLightningWallet(Wallet):
     async def create_invoice(
         self,
         amount: int,
-        memo: Optional[str] = None,
-        description_hash: Optional[bytes] = None,
-        unhashed_description: Optional[bytes] = None,
+        memo: str | None = None,
+        description_hash: bytes | None = None,
+        unhashed_description: bytes | None = None,
         **kwargs,
     ) -> InvoiceResponse:
-        label = kwargs.get("label", f"lbl{random.random()}")
+        label = kwargs.get("label", f"lbl{token_urlsafe(16)}")
         msat: int = int(amount * 1000)
         try:
             if description_hash and not unhashed_description:

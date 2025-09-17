@@ -4,9 +4,10 @@ import importlib
 import os
 import shutil
 import sys
+import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Callable, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +27,8 @@ from lnbits.core.crud.extensions import create_installed_extension
 from lnbits.core.helpers import migrate_extension_database
 from lnbits.core.models.notifications import NotificationType
 from lnbits.core.services.extensions import deactivate_extension, get_valid_extensions
-from lnbits.core.services.notifications import enqueue_notification
+from lnbits.core.services.notifications import enqueue_admin_notification
+from lnbits.core.services.payments import check_pending_payments
 from lnbits.core.tasks import (
     audit_queue,
     collect_exchange_rates_data,
@@ -65,17 +67,13 @@ from .middleware import (
     add_ip_block_middleware,
     add_ratelimit_middleware,
 )
-from .requestvars import g
-from .tasks import (
-    check_pending_payments,
-    internal_invoice_listener,
-    invoice_listener,
-)
+from .tasks import internal_invoice_listener, invoice_listener, run_interval
 
 
 async def startup(app: FastAPI):
+    logger.info(f"Starting LNbits Version: {settings.version}")
+    start = time.perf_counter()
     settings.lnbits_running = True
-
     # wait till migration is done
     await migrate_databases()
 
@@ -106,7 +104,7 @@ async def startup(app: FastAPI):
     # initialize tasks
     register_async_tasks()
 
-    enqueue_notification(
+    enqueue_admin_notification(
         NotificationType.server_start_stop,
         {
             "message": "LNbits server started.",
@@ -114,10 +112,13 @@ async def startup(app: FastAPI):
         },
     )
 
+    end = time.perf_counter()
+    logger.success(f"LNbits started in {end - start:.2f} seconds.")
+
 
 async def shutdown():
     logger.warning("LNbits shutting down...")
-    enqueue_notification(
+    enqueue_admin_notification(
         NotificationType.server_start_stop,
         {
             "message": "LNbits server shutting down...",
@@ -170,8 +171,6 @@ def create_app() -> FastAPI:
         StaticFiles(directory=Path(settings.lnbits_data_folder, "images")),
         name="library",
     )
-
-    g().base_url = f"http://{settings.host}:{settings.port}"
 
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -280,8 +279,8 @@ async def check_installed_extensions(app: FastAPI):
         logger.info(f"{ext.id} ({ext.installed_version})")
 
 
-async def build_all_installed_extensions_list(
-    include_deactivated: Optional[bool] = True,
+async def build_all_installed_extensions_list(  # noqa: C901
+    include_deactivated: bool | None = True,
 ) -> list[InstallableExtension]:
     """
     Returns a list of all the installed extensions plus the extensions that
@@ -454,7 +453,7 @@ def register_ext_routes(app: FastAPI, ext: Extension) -> None:
     app.include_router(router=ext_route, prefix=prefix)
 
 
-async def check_and_register_extensions(app: FastAPI):
+async def check_and_register_extensions(app: FastAPI) -> None:
     await check_installed_extensions(app)
     for ext in await get_valid_extensions(False):
         try:
@@ -464,12 +463,12 @@ async def check_and_register_extensions(app: FastAPI):
             logger.error(f"Could not load extension `{ext.code}`: {exc!s}")
 
 
-def register_async_tasks():
+def register_async_tasks() -> None:
 
     create_permanent_task(wait_for_audit_data)
     create_permanent_task(wait_notification_messages)
 
-    create_permanent_task(check_pending_payments)
+    create_permanent_task(run_interval(30 * 60, check_pending_payments))
     create_permanent_task(invoice_listener)
     create_permanent_task(internal_invoice_listener)
     create_permanent_task(cache.invalidate_forever)
